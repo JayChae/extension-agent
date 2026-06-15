@@ -39,11 +39,11 @@
 
 "코드는 최대한 단순 / 에이전트엔 더 많은 권한"이라는 두 목표는 같은 결론입니다.
 
-- **분기 로직을 코드에 박지 않는다.** "확신도 < 0.85면 사람에게 묻기" 같은 if문 없음. *언제 물어볼지조차 모델이 도구로 스스로 결정.*
+- **업무 분기 로직을 코드에 박지 않는다.** "확신도 < 0.85면 사람에게 묻기" 같은 if문 없음. *언제 물어볼지조차 모델이 도구로 스스로 결정.* (단, *안전 가드레일*은 예외 — 스텝 예산·무진전 감지·연속 실패·졸업 카운터는 일부러 코드가 강제하는 if문이다. 즉 **업무 판단은 모델이, 안전 한계선은 코드가**.)
 - **상태머신(그래프)을 만들지 않는다.** Pydantic AI 공식문서: *"그래프는 못총(nail gun)이다 — 필요할 때가 아니면 쓰지 마라."* `agent.run()`이 이미 `모델 → 도구 → 결과` 루프를 내부에서 돈다.
 - **연구의 정설과 일치.** AgentOccam 논문: 그래프·스캐폴딩 없이 관측/행동 공간을 다듬기만 해도 +161%. 똑똑함은 노드 머신이 아니라 *지각의 질 + 기억*에서 나온다.
 
-> 우리가 직접 짜는 코드(=harness: 모델의 판단을 실제 동작으로 옮기고 안전을 강제하는 AI가 아닌 일반 코드)는 *지각 스냅샷 만들기 · 파일/git I/O · 안전 게이트 · 성숙도 카운터*뿐. 나머지 모든 판단은 모델이 도구로 소유한다.
+> 우리가 직접 짜는 코드(=harness: 모델의 판단을 실제 동작으로 옮기고 안전을 강제하는 AI가 아닌 일반 코드)는 *지각 스냅샷 만들기 · 파일/git I/O · 안전 게이트 · 성숙도 카운터 · 헛돎 가드레일(스텝 예산·무진전·연속 실패)*뿐. **업무에 관한 모든 판단**은 모델이 도구로 소유하고, **안전·종료 한계선**만 코드가 강제한다.
 
 ---
 
@@ -123,10 +123,11 @@
 
 모델은 **현재 관측의 인덱스로만** 행동하고 셀렉터를 절대 생성하지 않는다(Gemini 설계의 가장 취약한 지점 제거).
 
-- **2단계 실행:** 기본은 content-script 합성 이벤트(빠름, 배너 없음) → 사이트가 untrusted 이벤트를 거부하면 *그 한 액션만* `chrome.debugger`의 `Input.dispatch*`로 에스컬레이션("디버깅 중" 배너를 알려진 세금으로 수용).
+- **2단계 실행:** 기본은 content-script 합성 이벤트(빠름, 배너 없음) → 사이트가 untrusted 이벤트를 거부하면 *그 한 액션만* `chrome.debugger`의 `Input.dispatch*`로 에스컬레이션("디버깅 중" 배너를 알려진 세금으로 수용). ✅ **scourt는 합성 이벤트를 수용함이 기존 운영 RPA로 확인됨**(JS `.click()`·jQuery `.trigger('click')` = `isTrusted=false`로 핵심 컨트롤을 매일 구동) → 에스컬레이션은 드문 예외.
 - **저장용 요소 IDENTITY는 XPath가 아니라 랭크된 로케이터 사다리:** ① `role+accessible name` ② 안정적 `data-testid/id` ③ label/placeholder ④ visible text+근접 landmark ⑤ 위치 폴백. 실행/리플레이 시 위→아래로 시도, 다 실패하면 LLM이 현재 목록에서 재그라운딩.
 - **🔒 크리티컬 액션 하드 게이트:** 비가역 액션(제출/결제/취하) allowlist + SOP `always_confirm` → 신뢰도/성숙도 무관 강제 승인. 실행 직전 *해석된 요소 라벨/역할이 의도와 일치하는지 검증*(악성 페이지가 양성 로케이터를 제출 컨트롤에 겨누는 것 방어).
 - **CAPTCHA/안티봇 감지 시 STOP→인간 핸드오프** — 하드코딩, 풀거나 우회하지 않음(ToS 준수, 인젝션 저항).
+- **네이티브 JS 다이얼로그(`alert`/`confirm`) 자동 처리:** scourt는 네이티브 경고창을 띄움(기존 RPA가 `switch_to.alert`로 처리). content script(isolated world)는 이 창을 못 닫으므로, 페이지 스크립트 실행 전 **MAIN world에 주입한 작은 훅으로 `window.alert/confirm`을 가로채** 자동 수락 + 메시지를 모델 관측으로 전달. "content script는 얇게(isolated)" 원칙의 *유일한* MAIN-world 예외.
 
 ---
 
@@ -169,9 +170,10 @@ def submit_document(...): ...
 
 흐름: ① `ask_human` 호출 → 런이 `DeferredToolRequests`로 깔끔히 종료 → ② 백엔드가 `result.all_messages()`를 직렬화 저장, 질문을 사이드패널로 푸시 → ③ **사람이 분/시간 뒤 답해도 OK**(재개는 무상태 message_history 리플레이, durable 백엔드 불필요) → ④ `agent.run(message_history=..., deferred_tool_results=...)`로 재개.
 
-**두 트리거:**
+**세 트리거:**
 - **소프트(모델 소유):** 모델이 스스로 불확실해 `ask_human` 호출.
 - **하드(우회 불가):** 제출/결제/취하 같은 비가역 액션 + CAPTCHA는 모델 확신도와 무관하게 강제 승인/핸드오프. (로그인·인증서는 비가역이 아니므로 섹션 11 금고로 직접 처리)
+- **헛돎 감지(harness 강제, 모델 판단 아님):** ① **스텝 예산** 초과(행복경로 스텝 ×3) ② **무진전** — 최근 N스텝 관측 해시 반복 또는 같은 도구·인덱스 반복 호출 ③ **연속 실패** K회(요소 못 찾음·에러) ④ 전역 wall-clock 타임아웃. 하나라도 걸리면 `ask_human`으로 깔끔히 종료(`DeferredToolRequests`) → 무한루프·헛돎 차단. (대화형 에이전트엔 필수 — 무인 배치 RPA엔 없던 안전망.)
 
 ---
 
@@ -207,7 +209,7 @@ def submit_document(...): ...
 
 > ⚠️ XPath가 아니라 **요소의 역할+이름+텍스트+주변 단서+입력값**을 기록(나중에 다시 찾으려고).
 
-모델이 증류 → 특정값을 슬롯으로 일반화: `"2024가단12345 입력"` → `"사건번호 칸에 {사건번호} 입력"`. 한 번의 시연이 *모든 사건에 쓰는 템플릿*이 됨. → 사람이 SOP 초안 승인, 성숙도 `LEARNING`으로 시작.
+모델이 증류 → 특정값을 슬롯으로 일반화: `"2024가단12345 입력"` → `"사건번호 칸에 {사건번호} 입력"`. 단, 한 번의 시연은 *모든 분기를 담은 완성 템플릿*이 아니라 **행복경로(happy path) 골격**이다(현실적으로 1회 시연이 분기를 다 담을 수 없음). 증류 시 강한 모델이 **미해결 분기를 SOP에 빈칸(TODO)으로 명시**(예: "결과 0건이면? 여러 건이면? 지원 vs 본원?") → 처음 그 상황을 만나면 `ask_human`. 분기는 경로②·③으로 *운영하며 성숙*한다. → 사람이 SOP 초안 승인, 성숙도 `LEARNING`으로 시작.
 
 ### 경로 ② 막히면 물어서 배우기
 
@@ -358,6 +360,11 @@ goal: 사건번호로 사건 진행 상태를 조회한다
 input_slots:
   - { name: 사건번호, desc: "예: 2024가단12345" }
   - { name: 관할법원, desc: "예: 서울중앙지방법원" }
+verify:                                    # 결정적 성공 판정 (자유서술 금지, 4종 중 ≥2종 필수)
+  must_appear: ["접수번호 텍스트가 결과영역에 존재"]            # 긍정 신호
+  must_match:  ["결과 행 사건번호 == {사건번호} (끝자리까지 완전일치)"]  # 입력-출력 일치
+  must_not:    ["'오류'/'권한 없음' 텍스트 또는 네이티브 alert 발생"]   # 부정 신호 부재
+  artifact:    []                          # (해당 시) 다운로드 파일 존재 AND 크기>0
 maturity:
   level: ASSISTED                          # 현재 성숙도
   success_window: [O,O,X,O,O,O,O,O,O,O]    # 최근 10번 성공/실패
@@ -366,10 +373,11 @@ maturity:
 # (NL 스텝들 + 레슨들)
 ```
 
-핵심 3가지: ① 순서는 **자연어**(셀렉터 아님 → 런타임 재그라운딩) ② `{슬롯}` 빈칸으로 템플릿화 ③ 레슨이 누적.
+핵심 4가지: ① 순서는 **자연어**(셀렉터 아님 → 런타임 재그라운딩) ② `{슬롯}` 빈칸으로 템플릿화 ③ 레슨이 누적 ④ `verify:`로 성공을 **결정적 검증**(졸업 집계의 근거, 자기선언 금지 — 섹션 10).
 
 - **개인 레슨은 자유 기록, 팀 공식 SOP는 git PR 승인**으로만 공유(아무나 팀 노트를 더럽히지 못하게).
 - **벡터 인덱스는 레슨/케이스에만**(키 없는 비정형). SOP/스킬은 `master_index.json`으로 결정적 라우팅.
+- **`master_index.json`은 "재생성 가능한 파생 캐시"** — 진실의 원천은 SOP/스킬 파일 프론트매터(`goal`/`name`). 갱신은 **사람 승인 트랜잭션 안에서 harness가 원자적으로**(파일 + 인덱스를 같은 git commit) 수행하고 모델이 직접 쓰지 않음(인젝션·불일치 방지). 손상 시 파일 스캔으로 `rebuild_index`, 런 시작 시 정합성 검증(인덱스 ↔ 실제 파일).
 - 사람이 마크다운을 직접 열어 고쳐도 됨(git이 이력 남김).
 
 ### 런타임에 메모리 쓰는 순서
@@ -390,7 +398,7 @@ maturity:
 | **AUTONOMOUS** | 완전 무인, 사람은 예외만 처리 |
 
 - 승급: 최근 N=10 런의 **검증된** 성공률 ≥ T(예 0.9) + 최소 횟수. **실패·반려 시 강등.**
-- 성공은 반드시 `verify_success()`로 검증(자기선언 금지). 예: "사건 조회"는 *특정 사건번호 행이 결과에 나타남*으로 결정적 검증.
+- 성공은 반드시 `verify_success()`로 검증(자기선언 금지) — SOP 프론트매터의 구조화 `verify:`(긍정 `must_appear` / 입출력 일치 `must_match` / 오류 부재 `must_not` / 산출물 `artifact`, **4종 중 ≥2종 필수**, 섹션 9)를 평가. 예: "사건 조회"는 *결과 행 사건번호가 입력과 끝자리까지 일치*로 결정적 검증. **비가역 task는 verify로 졸업시키지 않음**(항상 사람 승인).
 - 🔒 **크리티컬/비가역 스텝은 성숙도와 무관하게 항상 에스컬레이션** — 졸업 사다리와 분리.
 - 사이드패널 대시보드가 레벨·성공 추세 표시 → *"신입이 크는 게" 눈에 보임.*
 
@@ -407,7 +415,7 @@ maturity:
 | **비가역 액션 (제출/결제/취하)** | 🔒 신뢰 코드 allowlist + `always_confirm` → 성숙도/확신도 무관 강제 인간 승인 |
 | **프롬프트 인젝션** | 페이지 콘텐츠 `UNTRUSTED_DATA` 격리 + 숨은 지시 제거 + 교정의 인간 승인 게이트로 SOP 세탁 차단(완전 제거는 불가) |
 | **감사 추적** | 모든 관측·추론·제안 액션·인간 승인(신원+시각)·교정·실행 결과를 **SHA-256 해시체인** append-only, WORM 스토리지 |
-| **PII / PIPA 국외이전** | 전송 전 로컬 리댁션, 데이터 최소화. **법무 티어는 zero-data-retention Claude 엔드포인트 + DPA, 또는 온프렘/인-Korea** |
+| **PII / PIPA 국외이전** | 전송 전 로컬 리댁션, 데이터 최소화. **결정: zero-data-retention Claude 엔드포인트 + DPA(클라우드 경로) 채택. 온프렘/인-Korea는 보류.** ※ 회사 법무 최종 사인오프 필요 |
 | **도메인/액션 경계** | scourt.go.kr 호스트 allowlist, 레이트 리미터, 항상 보이는 **STOP**(content-script 실행기에서 클릭 직전 마지막 취소) |
 
 ### 🔐 로그인·공동인증서 — 직접 하되 안전하게
@@ -425,7 +433,7 @@ maturity:
 | 익스텐션 | Chrome MV3: `sidePanel` + 얇은 SW + `*.scourt.go.kr` content script(`all_frames:true`). permissions: `sidePanel, scripting, storage, debugger`(에스컬레이션 전용) |
 | 백엔드 | Python **FastAPI**, WebSocket 1개 |
 | 에이전트 | **Pydantic AI 단일 Agent** (pydantic-graph 없음). `pydantic-ai-slim[anthropic]`, deferred tools |
-| 관측성 | **Pydantic Logfire** (`Agent(instrument=True)`, OpenTelemetry) |
+| 관측성 | **Pydantic Logfire** (`capabilities=[Instrumentation(...)]`, OpenTelemetry — 현재 공식 권장 방식. 구 `Agent(instrument=True)`는 현 공식문서에 더는 안 나옴 → 사용 금지) |
 | 감사 | SHA-256 해시체인 append-only, WORM/object-lock |
 
 ### 모델 라우팅
@@ -437,16 +445,27 @@ maturity:
 
 ### 프롬프트 캐싱이 비용의 척추
 
-- 안정 프리픽스 `[도구 정의] + [고정 시스템 프롬프트] + [자주 쓰는 SOP]`에 하나의 캐시 브레이크포인트. Pydantic AI의 `anthropic_cache_instructions=True` + `anthropic_cache_tool_definitions=True`로 한 줄 설정.
+- 안정 프리픽스 `[도구 정의] + [고정 시스템 프롬프트] + [자주 쓰는 SOP]`에 하나의 캐시 브레이크포인트. Pydantic AI에선 `AnthropicModelSettings(anthropic_cache_instructions=True, anthropic_cache_tool_definitions=True)`를 `model_settings=`로 넘겨 설정(Agent 생성자 직접 인자 아님).
 - 변동 데이터(url, 요소 목록, tab_id)는 브레이크포인트 *뒤*에 주입 — 절대 캐시 프리픽스에 끼워넣지 않음.
 - 캐시 읽기 ~0.1×, 쓰기 ~1.25×(5분 TTL). `result.usage.cache_read_tokens`로 검증.
 - ⚠️ **캐시는 모델별로 분리됨.** Sonnet 루프 캐시와 Opus 호출 캐시는 별개 → 한 대화에서 모델을 갈아끼우지 말고 Opus 에스컬레이션은 별도 호출로(각자 자기 캐시). Opus 4.8 최소 캐시 프리픽스 4,096토큰.
+
+### 지연시간(latency) 예산 — 대화형이라 "멈춘 듯" 보이면 안 됨
+
+무인 배치 RPA와 달리 사람이 지켜보는 *대화형* 도구라, 절대 속도보다 **체감 끊김 없음**이 목표(진행표시가 있으면 스텝당 2~5초 수용 가능).
+
+- **측정 먼저:** "스텝당 목표 < X초" SLO를 잡고 Logfire로 스텝을 분해(관측 생성 / WS 왕복 / 모델 추론 / 실행) → 병목이 추론인지 네트워크인지 식별.
+- **추론 병목:** Sonnet+effort `low`/`medium` + 프롬프트 캐싱(읽기 0.1×는 비용뿐 아니라 TTFB↓) + **캐시 프리워밍**(세션 시작 시 `max_tokens:0`로 시스템 프롬프트 프리필) + 스트리밍으로 도구호출 조기 시작.
+- **네트워크 병목:** **백엔드를 한국 리전에**(브라우저↔백엔드 왕복 단축 — 배포 모델 결정과 동시 해결) + 관측 페이로드 최소화(이미 채택: 컴팩트 인덱스, DOM텍스트>스크린샷).
+- **체감 숨기기:** 사이드패널에 실시간 진행 표시(Opus 4.8은 진행 내레이션을 기본으로 잘 함) → 사용자가 "멈춘 것"으로 느끼지 않게.
 
 ---
 
 ## 13. MVP 범위 (가장 작은 1차)
 
 > **목표: "막히면 묻고 · 가르치면 기억하고 · 교정으로 배우고 · 점점 나아진다" 4가지를 한 task로 증명.**
+
+> ⚠️ **0순위 전제 — 그라운딩 실측 스파이크 (코드 본격 착수 전에 먼저).** 이 시스템 전체는 "scourt 화면에서 인터랙티브 요소(버튼·입력칸)를 정확히 집어내기"에 달려 있다. scourt는 커스텀 JS 위젯 정부 사이트라 바로 이게 가장 취약하다. → 본 MVP를 짜기 *전에*, 대표 화면 몇 개에서 섹션 3의 멀티시그널 인덱스가 핵심 컨트롤을 몇 %나 잡아내는지 **작은 실험으로 측정**한다. 이 수치가 나쁘면 지각 설계를 먼저 손봐야 하며, 문서를 더 다듬는 것보다 우선한다.
 
 1. **단일 task, 단일 법원** (예: scourt.go.kr 사건 검색·조회). 멀티탭/팝업/iframe, CDP 신뢰입력, 결정적 리플레이, 벡터 RAG, 팀 승격, 조립식 스킬 추출은 *전부 후순위.*
 2. **익스텐션:** 사이드패널(채팅 + 승인 카드 + "Show me" + STOP) + 얇은 SW 라우터 + 단일 사이트 content script(인덱스 목록 + 합성 click/type + 시연 녹화). **CDP 없음, 스크린샷 없음(텍스트만).**
@@ -455,7 +474,7 @@ maturity:
 5. **🟢 가르치면 기억한다** — "Show me" 1회 → Opus가 파라미터화 SOP 초안 → 인간 diff 승인 → git 커밋 → 다음 런에서 로드
 6. **🟢 교정으로 배운다** — 다음 런에서 `ask_human` → 인간 교정 → 레슨으로 SOP 첨부(승인 후) → 그 다음엔 덜 물음
 7. **🟢 점점 나아진다** — maturity + `verify_success()` + 성공률 임계 시 LEARNING→ASSISTED 1단계 승급을 대시보드에 표시
-8. **🔒 안전 최소:** 크리티컬 액션 allowlist(제출 버튼)→강제 승인, 도메인 allowlist, 평문 감사 로그(해시체인은 v2), password/인증서 필드 블랭킹. **로그인은 금고+`fill_credential`로 직접**(인증서 네이티브 창은 v2).
+8. **🔒 안전 최소:** 크리티컬 액션 allowlist(제출 버튼)→강제 승인, 도메인 allowlist, 평문 감사 로그(해시체인은 v2), password/인증서 필드 블랭킹. **로그인은 금고+`fill_credential`로 직접**(공동인증서는 DOM이라 MVP 가능; 네이티브 `alert/confirm` 훅은 MVP에 소량 포함 — 섹션 4).
 
 ---
 
@@ -464,23 +483,28 @@ maturity:
 1. **초기 자율성** — 그라운딩 한계로 초기엔 자주 물음. 완전 자율은 후기 상태. `ask_human`은 버그가 아니라 핵심 기능.
 2. **강한 모델 증류 의존** — 과/소 일반화 시 잘못된 SOP가 영속. **인간 diff 승인이 유일한 방어선** → 검토를 건너뛰면 안 됨.
 3. **`verify_success` 품질** — 약하면 조용한 실패로 졸업. task별 강한 검증 기준 필요.
-4. **chrome.debugger 배너** — 합성 이벤트 광범위 거부 시 상시 UX 세금 또는 엔터프라이즈 설치.
+4. **chrome.debugger 배너** — 합성 이벤트 광범위 거부 시 상시 UX 세금. *단 scourt는 합성 이벤트를 수용함이 기존 RPA로 확인되어 위험 낮음* — 에스컬레이션은 드문 예외 경로.
 5. **cross-origin iframe/OOPIF** — a11y 트리·content-script 경계를 깸. 추가 CDP flat-session 플러밍 전까지 요소를 못 봄.
-6. **PIPA 국외이전** — US 엔드포인트 전송은 동의/DPA 없이는 위반 소지. zero-retention+DPA 또는 온프렘 사실상 필수.
+6. **PIPA 국외이전** — US 엔드포인트 전송은 동의/DPA 없이는 위반 소지. *결정: zero-retention+DPA 클라우드 경로 채택(섹션 11)* — 단 회사 법무 최종 사인오프 필요.
 7. **단일 에이전트 = mid-step 크래시 복구 없음** — 긴 인간 대기는 직렬화 message_history로 처리되나, 진정한 중간 크래시 복구는 후일 durable 백엔드(Temporal/DBOS) 필요(의도적 후순위).
-8. **인증서 네이티브 창** — DOM이 아니면 네이티브 헬퍼 필요(별도 개발).
+8. **네이티브 JS 다이얼로그** — 공동인증서는 DOM으로 확인되어 네이티브 헬퍼 불필요(해소). 단 scourt가 띄우는 네이티브 `alert/confirm` 창은 content script가 못 닫음 → MAIN world 주입 훅 필요(섹션 4). Selenium이 공짜로 받던 걸 익스텐션은 명시 설계해야 함.
 
 ---
 
 ## 15. 결정이 필요한 열린 질문
 
-1. **배포 모델:** PIPA상 zero-data-retention 클라우드+DPA로 충분한가, 온프렘/인-Korea가 요구되는가? (모델 선택·비용 직결)
-2. **scourt.go.kr이 합성 이벤트(`isTrusted=false`)를 크리티컬 컨트롤에서 거부하는가?** 거부 시 디버깅 배너 수용 vs 엔터프라이즈 설치.
-3. **공동인증서가 DOM인가 OS 네이티브 창인가?** 네이티브면 헬퍼 앱 개발 필요.
-4. **팀 규모/공유:** 처음부터 다수 직원이 팀 공식 SOP를 공유·승격하는 2티어가 필요한가, MVP는 1인용으로 시작?
-5. **`verify_success` 기준:** 타깃 task의 성공을 무엇으로 결정적 검증하나?
-6. **법원 사이트에 cross-origin iframe/OOPIF가 쓰이는가?** 쓰이면 CDP flat-session을 MVP에 포함할지.
-7. **감사 로그 보존:** 무결성(해시체인)은 전체에, 민감 페이로드는 접근통제+보존한도로 분리 저장이 충분한가, 별도 규정 요건이 있는가?
+### ✅ 해소됨 (검증 완료)
+
+- **배포 모델 → 클라우드 + 안전장치로 결정.** zero-data-retention Claude 엔드포인트 + DPA + 전송 전 PII 리댁션(섹션 11). 온프렘/인-Korea 보류. (※ 회사 법무 최종 사인오프는 별도.)
+- **합성 이벤트 거부 여부 → 거부 안 함.** 기존 운영 RPA가 scourt 핵심 컨트롤을 JS `.click()`·jQuery `.trigger('click')`(둘 다 `isTrusted=false`)로 매일 구동 → content script 합성 이벤트 기본 경로가 통함, `chrome.debugger`는 드문 폴백.
+- **공동인증서 DOM/네이티브 → DOM.** 인증서는 DOM 목록에서 인덱스 선택(기존 RPA certIdx 패턴과 일치) → 네이티브 헬퍼 앱 불필요. (단 *다른* 네이티브 위협인 JS `alert/confirm` 다이얼로그는 섹션 4·14 참조.)
+
+### 남은 열린 질문
+
+1. **팀 규모/공유:** 처음부터 다수 직원이 팀 공식 SOP를 공유·승격하는 2티어가 필요한가, MVP는 1인용으로 시작?
+2. **`verify_success` 기준:** 타깃 task의 성공을 무엇으로 결정적 검증하나? (검증 *스키마*는 섹션 10에 구조화 — task별 값만 채우면 됨.)
+3. **법원 사이트에 cross-origin iframe/OOPIF가 쓰이는가?** 쓰이면 CDP flat-session을 MVP에 포함할지.
+4. **감사 로그 보존:** 무결성(해시체인)은 전체에, 민감 페이로드는 접근통제+보존한도로 분리 저장이 충분한가, 별도 규정 요건이 있는가?
 
 ---
 
@@ -501,10 +525,10 @@ maturity:
 ## 부록 B. 공식문서/연구 근거
 
 **공식문서**
-- 사이드패널: 모든 chrome API 접근 + idle 종료 안 됨; `open()`은 사용자 제스처 필요 — [chrome.sidePanel](https://developer.chrome.com/docs/extensions/reference/api/sidePanel)
+- 사이드패널: 모든 chrome API 접근, `open()`은 사용자 제스처 필요(둘 다 공식 명시). 확장 *페이지*라 SW의 30초 idle 종료 대상이 아니며 패널이 열려 있는 한 유지됨(이 지속성은 문서가 그 문구로 명시한 게 아니라 "확장 페이지" 정의에서 따라오는 추론) — [chrome.sidePanel](https://developer.chrome.com/docs/extensions/reference/api/sidePanel)
 - SW는 30초 idle / 단일 요청 5분에 종료 — [SW lifecycle](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle)
 - content script는 새 탭/팝업/iframe에 자동 주입 — [content scripts](https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts)
-- `chrome.debugger`만 트러스티드 입력 가능, 억제 불가 배너 — [chrome.debugger](https://developer.chrome.com/docs/extensions/reference/api/debugger)
+- `chrome.debugger`(CDP) 사용 시 억제 불가 "디버깅 중" 배너(공식 명시). CDP `Input.dispatch*`가 `isTrusted=true` 입력을 만든다는 건 CDP 런타임 속성이지 이 문서가 보증하는 문구는 아님 — [chrome.debugger](https://developer.chrome.com/docs/extensions/reference/api/debugger)
 - `captureVisibleTab`은 활성 탭 가시영역만, 2회/초 — [chrome.tabs](https://developer.chrome.com/docs/extensions/reference/api/tabs)
 - deferred tools = `DeferredToolRequests`로 종료, 무상태 재개 — [Pydantic AI deferred tools](https://pydantic.dev/docs/ai/tools-toolsets/deferred-tools/)
 - pydantic-graph는 "못총 — 필요할 때만" — [Pydantic AI graph](https://pydantic.dev/docs/ai/graph/graph/)
