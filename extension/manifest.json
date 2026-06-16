@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "AI 신입사원",
+  "version": "0.1.0",
+  "permissions": ["sidePanel", "scripting", "storage"],
+  "action": {},
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://scourt.go.kr/*", "https://*.scourt.go.kr/*"],
+      "js": ["content.js"],
+      "all_frames": true
+    }
+  ]
+}

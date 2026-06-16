@@ -1,0 +1,19 @@
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Node
+node_modules/
+
+# Secrets
+.env*
+!.env.example
+
+# Build artifacts
+dist/
+build/
+
+# OS
+.DS_Store
