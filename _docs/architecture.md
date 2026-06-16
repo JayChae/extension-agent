@@ -137,6 +137,7 @@
 
 | 도구 | 하는 일 |
 |---|---|
+| `perceive()` | 화면을 바꾸지 않고 인덱스 요소 목록만 다시 읽기(첫 행동·navigate 직후 필수). *Phase 4 구현 시 추가* — 계약상 1 command⇒1 observation이라 첫 관측·재독 채널이 필요 |
 | `click(index)` `type(index, text)` `select(index, opt)` | 인덱스 요소 조작 |
 | `navigate(url)` `scroll(dir)` `extract(query)` | 이동·스크롤·데이터 추출 |
 | `see_screen()` | (옵션) DOM만으로 모호할 때만 스크린샷 |
@@ -146,7 +147,7 @@
 | **`ask_human(question)`** | 모를 때 사수에게 질문 (멈춤) |
 | `propose_sop_diff(diff)` | 배운 걸 노트에 적기 (사람 승인 후 저장) |
 | `verify_success(criteria)` | 잘 됐는지 자기검증(졸업 집계용) |
-| `done(result)` | 완료 선언 |
+| `done(result)` | 완료 선언 — *Phase 4 구현*: 일반 도구가 아니라 **output 도구**(`ToolOutput`)로 호출되면 런이 끝나고 `result.output`이 됨 |
 
 ---
 
@@ -443,7 +444,7 @@ maturity:
 
 | 용도 | 모델 | 비고 |
 |---|---|---|
-| **고빈도 스텝 루프** | **`claude-sonnet-4-6`** ($3/$15, 1M ctx) — 정부 사이트 그라운딩 정확도가 병목이라 기본 권장. 비용 최우선이면 `claude-haiku-4-5`($1/$5) | adaptive thinking, effort `low`/`medium` |
+| **고빈도 스텝 루프** | **`claude-sonnet-4-6`** ($3/$15, 1M ctx) — 정부 사이트 그라운딩 정확도가 병목이라 기본 권장. 비용 최우선이면 `claude-haiku-4-5`($1/$5) | adaptive thinking, effort `low`/`medium` — ⚠️ *Phase 4 발견*: Anthropic은 thinking과 output 도구(`done`)를 동시에 못 씀 → 결정적 `done` 종료를 택해 Phase 4는 thinking을 **끔**. thinking을 되살리려면 `done`을 `NativeOutput`으로 바꾸거나, 가드레일이 종료를 책임지고 일반 텍스트 종료로 전환 |
 | **첫 시도·저신뢰·크리티컬·모든 교육/증류** | **`claude-opus-4-8`** ($5/$25, 1M ctx, 도구 오버헤드 290토큰, 고해상 비전 좌표 1:1) | adaptive thinking, effort `high` |
 
 ### 프롬프트 캐싱이 비용의 척추

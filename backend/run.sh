@@ -8,4 +8,4 @@ cd "$(dirname "$0")"
 
 echo "▶ 백엔드를 켭니다… (끄려면 Ctrl + C)"
 echo "   확인용 주소: http://127.0.0.1:8000"
-uv run uvicorn main:app --reload
+uv run uvicorn main:app --reload --env-file .env

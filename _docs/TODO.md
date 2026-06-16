@@ -13,7 +13,9 @@
 ---
 
 ## 📍 현재 위치
-> **Phase 3 구현·자동검증 완료 — 브라우저 풀루프 확인 + 커밋은 사용자 검토 대기. 다음은 Phase 4.** "손과 눈"이 붙었다: content script가 화면을 컴팩트 인덱스 목록으로 읽고(§3 멀티시그널 지각·표 markdown), 인덱스로 click/type/select/navigate/scroll/extract를 실행한다(§4, 합성 이벤트). 명령은 백엔드의 **임시 수동 파서**(채팅 `click N` 등 — Phase 4 에이전트가 대체)가 내리고, 관측이 백엔드로 돌아온다. 파서·WS왕복은 일회용 클라이언트로 자동검증. 다음은 "두뇌"(§5·§6 단일 Pydantic AI 에이전트 루프).
+> **Phase 4 구현·자동검증 완료 — 라이브 Claude 호출은 크레딧 충전 대기, 브라우저 풀루프·커밋은 사용자 검토 대기. 다음은 Phase 5.** "두뇌"가 붙었다: 백엔드의 임시 수동 파서를 **단일 Pydantic AI `agent.run()`** 가 대체했다(§5). 도구 perceive/click/type/select/navigate/scroll/extract/read_sop/done이 WS로 행동을 내리고 관측을 받아 루프를 돈다. 안전 가드레일 4종(스텝예산·무진전·연속실패·전역타임아웃)은 `Session`이 코드로 강제(§6). 관측은 `<UNTRUSTED_PAGE_DATA>` 펜스로 격리(§3). 루프+가드레일은 가짜 모델(FunctionModel)+가짜 브라우저(TestClient)로 8개 자동테스트 통과. 라이브 Sonnet은 요청 형식까지 확인됨(크레딧 부족 400에서 멈춤). 다음은 "막히면 묻는다"(§6 HITL — `ask_human`/DeferredToolRequests).
+>
+> ⚠️ **Phase 4 설계 델타 2건:** ① Anthropic은 thinking과 output 도구(`done`)를 **동시에 못 쓴다** → 결정적 done 종료를 위해 adaptive thinking은 끔(§12 권장과 충돌, 필요시 NativeOutput 전환 검토). ② 도구에 **`perceive` 추가**(첫 행동·navigate 직후 화면 재독용 — 계약상 1 command⇒1 observation이라 필요). extension 변경은 0.
 
 ---
 
@@ -69,13 +71,13 @@
 > Pydantic AI `agent.run()` 하나가 관측→사고→행동을 돈다. **상태머신·그래프 없음.**
 > ⚠️ 코드 짜기 전 [Pydantic AI 공식문서](https://ai.pydantic.dev/) 확인 (API 자주 바뀜, §12 / [principle.md](../.claude/rules/principle.md))
 
-- [ ] 단일 `Agent` + 도구 연결: `click/type/select/navigate/scroll/extract/read_sop/done`
-- [ ] 관측(인덱스목록+task)을 Claude에 전달 → 도구 1개 호출 → 실행 → 새 관측이 다음 입력
-- [ ] 모델 라우팅: 스텝 루프 = Sonnet 4.6 (§12)
-- [ ] 프롬프트 캐싱: 안정 프리픽스에 브레이크포인트 1개, 변동데이터는 뒤에 (§12)
-- [ ] **안전 가드레일(코드 강제, 모델 판단 아님)**: 스텝 예산(행복경로×3) / 무진전(관측 해시 반복) / 연속 실패 K회 / 전역 타임아웃 → 걸리면 깔끔히 종료 (§6)
+- [x] 단일 `Agent` + 도구 연결: `perceive/click/type/select/navigate/scroll/extract/read_sop/done` — `done`은 일반 도구가 아니라 output 도구(`ToolOutput`)로 런을 끝냄. `read_sop`은 SOP 없으면 "없음"(Phase 6에서 채워짐). `perceive`는 설계 델타로 추가(위 마커 참조)
+- [x] 관측(인덱스목록+task)을 Claude에 전달 → 도구 1개 호출 → 실행 → 새 관측이 다음 입력 — `agent.run()` **하나**가 내부 루프; 각 도구가 `Session.act()`로 WS 왕복(command 전송→obs_q에서 관측 수신). 수신루프만 ws의 유일한 reader
+- [x] 모델 라우팅: 스텝 루프 = Sonnet 4.6 (§12) — `MODEL`을 `agent.run(model=...)` 시점에 주입(키 없이 import·테스트 가능). ⚠️ adaptive thinking은 done 도구와 충돌해 끔(설계 델타)
+- [x] 프롬프트 캐싱: 안정 프리픽스에 브레이크포인트 1개, 변동데이터는 뒤에 (§12) — `AnthropicModelSettings(cache_instructions, cache_tool_definitions)`. 라이브 cache_read 확인은 크레딧 대기
+- [x] **안전 가드레일(코드 강제, 모델 판단 아님)**: 스텝 예산(행복경로×3=24) / 무진전(관측 해시 반복 + 같은 도구·인덱스 연속) / 연속 실패 K=3 / 전역 타임아웃(180s) → `RunHalted`로 깔끔히 종료 후 사용자에게 보고 (§6)
 
-**✅ 검증:** "사건검색" task를 사람 개입 없이 happy path 끝까지 수행(사건번호 입력→검색→결과표 도달). 헛돌면 무한루프 대신 가드레일이 멈춘다.
+**✅ 검증(달성):** 루프+가드레일 4종을 가짜 모델(FunctionModel)·가짜 브라우저(TestClient WS)로 자동검증 — happy path는 done 도달, 각 가드레일은 무한루프 대신 정지(8개 테스트 통과, `backend/tests/test_loop.py`). ⏳ 라이브 Sonnet happy-path + 캐시(`cache_read>0`)는 요청 형식까지 확인됨(크레딧 부족으로 보류, `backend/live_check.py`). 실제 scourt 브라우저 풀루프는 사용자 검토 대기.
 
 ---
 
