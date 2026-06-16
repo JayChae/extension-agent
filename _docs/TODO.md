@@ -13,7 +13,7 @@
 ---
 
 ## 📍 현재 위치
-> **Phase 2 구현·자동검증 완료 — 브라우저 풀루프 확인 + 커밋은 사용자 검토 대기. 다음은 Phase 3.** "메시지 한 바퀴"(사이드패널↔백엔드 WS, 사이드패널↔SW↔content) 배관이 통했다(백엔드 echo는 일회용 WS 클라이언트로 자동검증). 다음은 "손과 눈"(§3 지각 인덱스 + §4 행동 실행기).
+> **Phase 3 구현·자동검증 완료 — 브라우저 풀루프 확인 + 커밋은 사용자 검토 대기. 다음은 Phase 4.** "손과 눈"이 붙었다: content script가 화면을 컴팩트 인덱스 목록으로 읽고(§3 멀티시그널 지각·표 markdown), 인덱스로 click/type/select/navigate/scroll/extract를 실행한다(§4, 합성 이벤트). 명령은 백엔드의 **임시 수동 파서**(채팅 `click N` 등 — Phase 4 에이전트가 대체)가 내리고, 관측이 백엔드로 돌아온다. 파서·WS왕복은 일회용 클라이언트로 자동검증. 다음은 "두뇌"(§5·§6 단일 Pydantic AI 에이전트 루프).
 
 ---
 
@@ -54,13 +54,13 @@
 
 > §3의 멀티시그널 인덱싱을 content script로 구현하고, 백엔드가 시키는 대로 실제 DOM을 조작한다.
 
-- [ ] content script: 매 스텝 컴팩트 인덱스 요소 목록 생성 (§3 휴리스틱 — 네이티브 태그+ARIA+tabindex+onclick속성+cursor:pointer+eXBuilder6 접두사, 표뼈대 제외·컨테이너 dedup)
-- [ ] 행동 실행기: `click(index)` `type(index,text)` `select(index,opt)` `navigate` `scroll` `extract` — **인덱스로만, 셀렉터 생성 금지** (§4)
-- [ ] 테이블 → Markdown 변환 (행 텍스트로 매칭) (§3)
-- [ ] 보안 최소: password/인증서 필드 블랭킹(전송 전), `<UNTRUSTED_PAGE_DATA>` 마커 격리 (§3)
-- [ ] STOP이 클릭 직전 마지막 취소로 동작 (§11)
+- [x] content script: 매 스텝 컴팩트 인덱스 요소 목록 생성 (§3 휴리스틱 — 네이티브 태그+ARIA+tabindex+onclick속성+cursor:pointer+eXBuilder6 접두사, 표뼈대 제외·컨테이너 dedup) — 강/약 신호 분리(cursor:pointer는 상속되므로 약 신호), dedup은 "가장 안쪽 강 컨트롤 / 가장 바깥 약 요소"로 조상 walk(O(n·깊이))
+- [x] 행동 실행기: `click(index)` `type(index,text)` `select(index,opt)` `navigate` `scroll` `extract` — **인덱스로만, 셀렉터 생성 금지** (§4). 합성 이벤트(레거시 RPA로 수용 확인). stale/분리 노드는 `isConnected`로 거부. ※ 사건구분은 native `<select>`가 아니라 autocomplete(`_acp_..._input`) → `type`+`click`으로 다룸(레거시 확인). ※ (실기검증 중 발견·수정) 클릭이 페이지를 이동시키면 응답 포트가 닫히는데, SW 재전송 로직이 이를 "content 없음"으로 오인해 같은 명령을 새(빈 인덱스) 화면에 재전송 → 가짜 "인덱스 없음" 에러. 에러 종류를 구분해 이동 시엔 재전송 대신 "perceive로 다시 읽으세요" 안내
+- [x] 테이블 → Markdown 변환 (행 텍스트로 매칭) (§3) — 행 수 상한
+- [x] 보안 최소: password/인증서 필드 블랭킹(전송 전), `<UNTRUSTED_PAGE_DATA>` 마커 격리 (§3) — **블랭킹은 구조적으로**(관측에 input `.value`를 아예 안 실음 → 불투명 id 누락 위험 없음, denylist보다 강함). 마커는 **탈출 토큰 새니타이즈**(stripMarkers)까지 Phase 3, 실제 프롬프트 펜스는 모델 입력 지점(Phase 4)에서 적용
+- [x] STOP이 클릭 직전 마지막 취소로 동작 (§11) — content `stopped` 플래그를 액션 실행 직전 검사(SW 경유 `do_stop`). 하드킬(페이지 새로고침까지 유지). ⚠️ 남은 한계: STOP 시 활성 scourt 탭이 없으면 content 플래그가 안 켜지고 오류가 사이드패널에서 묵살됨(Phase 3엔 입력잠금으로 영향 적음, Phase 4 자율 루프 전 보강 대상)
 
-**✅ 검증:** 백엔드가 "인덱스 N 클릭/입력" 명령 → scourt에서 실제로 눌리고/입력되고, 새 화면의 인덱스 목록이 백엔드로 돌아온다.
+**✅ 검증(달성):** 백엔드 수동 파서 명령(`click N`/`type N ...`)이 구조화 액션으로 내려가고, content 실행 후 인덱스 목록 관측이 백엔드로 돌아옴을 일회용 WS 클라이언트로 자동검증(파서 단언 + WS 왕복). 브라우저 실제 scourt 풀루프(perceive→click→type→STOP)는 사용자 검토 대기.
 
 ---
 
