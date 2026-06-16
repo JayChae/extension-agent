@@ -13,7 +13,7 @@
 ---
 
 ## 📍 현재 위치
-> **Phase 1부터 시작.** 지각 기반(scourt 컨트롤 = 네이티브 태그 위주, §3)은 확정. 그 위에 "메시지 한 바퀴" 배관부터 통한다.
+> **Phase 1 완료 — 커밋/PR 검토 대기. 다음은 Phase 2.** 지각 기반(scourt 컨트롤 = 네이티브 태그 위주, §3)은 확정. 레포·개발환경 골격이 깔렸고, 다음은 "메시지 한 바퀴"(SW↔백엔드↔content script echo) 배관.
 
 ---
 
@@ -22,14 +22,14 @@
 > 본격 코딩 전 한 번만 까는 기초. **최소한만** 깐다([guidelines.md](../.claude/rules/guidelines.md) §2) — 지금 안 쓸 도구는 나중에.
 > 기본값: 백엔드 `uv`+`ruff`, 익스텐션은 번들러 없이 plain JS(MV3가 raw 파일 그대로 로드). TS/Vite는 필요해지면 그때.
 
-- [ ] 모노레포 디렉토리: `backend/` · `extension/` · `memory/` · `_docs/`(있음)
-- [ ] Python 환경: `uv` + `pyproject.toml`, 의존성 `pydantic-ai-slim[anthropic]` · `fastapi` · `uvicorn[standard]` · `websockets`
-- [ ] `.gitignore`: `.venv`, `node_modules`, `.env`, 빌드 산출물, **시크릿**
-- [ ] 시크릿 분리: `.env`(git 제외)에 `ANTHROPIC_API_KEY` — **백엔드에만, 익스텐션엔 절대 없음**(§11). `.env.example`만 커밋
-- [ ] 익스텐션 골격: `manifest.json`(MV3, permissions `sidePanel/scripting/storage`), 빈 사이드패널 HTML, 얇은 SW, content script 등록(`*.scourt.go.kr`)
-- [ ] (선택) 린트/포맷: 백엔드 `ruff`
-- [ ] `README.md`: 로컬 실행법 — 백엔드 띄우기 / 크롬에 익스텐션 "압축해제 로드"
-- [ ] 첫 커밋
+- [x] 모노레포 디렉토리: `backend/` · `extension/` · `memory/` · `_docs/`(있음)
+- [x] Python 환경: `uv` + `pyproject.toml`(Python 3.13), 의존성 `pydantic-ai-slim[anthropic]` · `fastapi` · `uvicorn[standard]` (`websockets`는 `uvicorn[standard]`에 포함돼 별도 추가 안 함) + 개발용 `ruff`
+- [x] `.gitignore`: `.venv`, `node_modules`, `.env*`(→`!.env.example`), 빌드 산출물, **시크릿**
+- [x] 시크릿 분리: `.env`(git 제외)에 `ANTHROPIC_API_KEY` — **백엔드에만, 익스텐션엔 절대 없음**(§11). `.env.example`만 커밋
+- [x] 익스텐션 골격: `manifest.json`(MV3, permissions `sidePanel/scripting/storage`, 툴바클릭→패널 `action`), 빈 사이드패널 HTML, 얇은 SW, content script 등록(`*.scourt.go.kr` — 주 사이트 `ecfs.scourt.go.kr`)
+- [x] (선택) 린트/포맷: 백엔드 `ruff`
+- [x] `README.md`: 로컬 실행법 — 백엔드 띄우기 / 크롬에 익스텐션 "압축해제 로드"
+- [ ] 첫 커밋 ← 사용자 검토 후 진행 (phase-1 브랜치 → PR)
 
 **✅ 검증:** `uv run uvicorn ...`로 백엔드가 뜨고, 크롬 `chrome://extensions`에서 익스텐션이 (빈 사이드패널이라도) 정상 로드된다. `.env`는 git에 안 올라간다(`git status`로 확인).
 
@@ -133,7 +133,7 @@
 > 안전은 마지막 단계가 아니라 처음부터 깔린다. 아래는 MVP 출시 전 반드시 켜져 있어야 할 최소선.
 
 - [ ] **크리티컬 액션 하드 게이트**: 비가역 액션(제출 등) allowlist + `always_confirm` → 성숙도/확신도 무관 강제 승인. 실행 직전 해석된 라벨/역할이 의도와 일치하는지 검증 (§4, §11)
-- [ ] **도메인 allowlist** `*.scourt.go.kr` + 레이트 리미터 (§11)
+- [ ] **도메인 allowlist** `*.scourt.go.kr`(주 사이트 `ecfs.scourt.go.kr`) + 레이트 리미터 (§11)
 - [ ] **CAPTCHA/안티봇 감지 → STOP·인간 핸드오프** (풀거나 우회 안 함) (§4)
 - [ ] **로그인·공동인증서**: 비밀값은 백엔드 금고(암호화) 1회 등록 → `fill_credential(index, kind)`로 입력, **Claude는 값 못 봄**. 인증서는 DOM 확인됨(§15) (§11)
 - [ ] **네이티브 `alert/confirm` 훅**: MAIN world 주입 작은 훅으로 가로채 자동수락+관측 전달 (content script 얇게 원칙의 유일한 예외) (§4)
