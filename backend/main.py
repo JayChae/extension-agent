@@ -5,11 +5,14 @@
 """
 
 import asyncio
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic_ai import DeferredToolRequests, DeferredToolResults
 
+import memory_store
 from agent import MODEL, agent
+from memory_agent import distill
 from session import RunHalted, Session, Stopped
 
 app = FastAPI()
@@ -69,6 +72,49 @@ async def run_task(
         await session.ws.send_json({"type": "backend_echo", "text": f"오류: {e}"})
 
 
+async def _reject_if_busy(session: Session, ws: WebSocket) -> bool:
+    """진행 중인 작업이 있으면 안내하고 True. user_input·record_demo 공통 가드."""
+    if session.task and not session.task.done():
+        await ws.send_json({"type": "backend_echo", "text": "이미 작업이 진행 중입니다."})
+        return True
+    return False
+
+
+def _site_from_events(events: list) -> str:
+    """녹화된 행동의 url 호스트에서 사이트를 추론(없으면 scourt.go.kr). 사이트별 메모리 레이아웃에 사용."""
+    for ev in events:
+        url = ev.get("url") if isinstance(ev, dict) else None
+        if url:
+            try:
+                host = urlparse(url).hostname or ""
+            except ValueError:
+                continue
+            if host:
+                return host
+    return "scourt.go.kr"
+
+
+async def run_distill(session: Session, site: str, name: str, events: list) -> None:
+    """시연을 메모리 에이전트(Opus)로 증류해 SOP 제안을 푸시한다. 별도 태스크라 STOP으로 취소 가능,
+    receive 루프는 증류 중에도 계속 응답한다(§7). 모델은 파일을 안 쓴다(§9)."""
+    try:
+        draft = await distill(events)
+    except asyncio.CancelledError:
+        raise  # STOP 취소
+    except Exception as e:  # 증류 모델/네트워크 예외
+        await session.ws.send_json({"type": "backend_echo", "text": f"증류 실패: {e}"})
+        return
+    session.pending_sop = {"site": site, "name": name, "draft": draft}
+    await session.ws.send_json(
+        {
+            "type": "propose_sop",
+            "path": f"sop/{site}/{name}.md",
+            "diff": memory_store.render_sop(draft),
+            "open_branches": draft.open_branches,
+        }
+    )
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
     await websocket.accept()
@@ -79,13 +125,15 @@ async def ws(websocket: WebSocket):
             mtype = msg.get("type")
 
             if mtype == "user_input":
-                if session.task and not session.task.done():
-                    await websocket.send_json(
-                        {"type": "backend_echo", "text": "이미 작업이 진행 중입니다."}
-                    )
+                if await _reject_if_busy(session, websocket):
                     continue
                 session.reset()
-                session.task = asyncio.create_task(run_task(session, msg.get("text", "")))
+                text = msg.get("text", "")
+                # 배운 SOP가 있으면 결정적 라우팅으로 read_sop 힌트를 앞에 붙인다(§9). 모델이 최종 판단.
+                sop_path = memory_store.route(text)
+                if sop_path:
+                    text = f"[힌트] read_sop('{sop_path}')로 이 업무의 SOP를 먼저 읽고 그 절차를 따르라.\n{text}"
+                session.task = asyncio.create_task(run_task(session, text))
 
             elif mtype == "observation":
                 await session.obs_q.put(msg.get("observation") or {})
@@ -108,8 +156,52 @@ async def ws(websocket: WebSocket):
                 # (런은 ask_human에서 이미 종료됐으므로 취소할 태스크는 없다.)
                 session.clear_pending()
 
+            elif mtype == "record_demo":
+                # "가르치기" 시연이 들어왔다 → 메모리 에이전트(Opus)가 SOP 초안으로 증류 →
+                # diff를 사이드패널에 띄워 사람 승인을 기다린다(§7 경로①). 모델은 파일을 안 쓴다(§9).
+                if await _reject_if_busy(session, websocket):
+                    continue
+                events = msg.get("events") or []
+                name = (msg.get("task") or "").strip()
+                # 업무 이름은 파일명이 되므로 경로 구분자/탈출 차단(저장 가드와 대칭).
+                if not name or not events or "/" in name or "\\" in name or ".." in name:
+                    await websocket.send_json(
+                        {"type": "backend_echo", "text": "녹화가 비어 있거나 이름이 올바르지 않아요."}
+                    )
+                    continue
+                site = _site_from_events(events)
+                # 증류는 수초 걸리는 Opus 호출 → 별도 태스크로 돌려 receive 루프·STOP 응답성 유지.
+                session.task = asyncio.create_task(run_distill(session, site, name, events))
+
+            elif mtype == "approve_sop":
+                # 사람 원클릭 승인 = "배웠다" 순간 + 인젝션 잠금(§7). harness가 파일+인덱스를 원자적 커밋.
+                if not session.pending_sop:
+                    # 카드가 만료됨(새 작업·재연결로 제안이 사라짐) → 사용자에게 알린다(조용한 유실 방지).
+                    await websocket.send_json(
+                        {"type": "backend_echo", "text": "승인할 제안이 없어요(만료됨). 다시 가르쳐 주세요."}
+                    )
+                    continue
+                p = session.pending_sop
+                try:
+                    # 파일 I/O + git을 스레드로 빼 이벤트 루프를 막지 않는다.
+                    res = await asyncio.to_thread(
+                        memory_store.approve, p["site"], p["name"], p["draft"], msg.get("branch_notes")
+                    )
+                except Exception as e:  # 파일/git 예외 — 제안을 남겨 재시도 가능하게.
+                    await websocket.send_json({"type": "backend_echo", "text": f"저장 실패: {e}"})
+                    continue
+                session.pending_sop = None  # 성공했을 때만 비운다(실패 시 드래프트 보존)
+                await websocket.send_json(
+                    {"type": "backend_echo", "text": f"배웠어요 — SOP 저장됨: {res['file']}"}
+                )
+
+            elif mtype == "reject_sop":
+                # 반려 → 제안 폐기(저장 안 함). 사유는 Phase 7 레슨 입력으로 확장 예정.
+                session.pending_sop = None
+
             elif mtype == "stop":
                 session.stopped = True
+                session.pending_sop = None
                 session.clear_pending()
                 if session.task and not session.task.done():
                     session.task.cancel()
