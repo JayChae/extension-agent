@@ -34,22 +34,40 @@ function connect() {
     const msg = JSON.parse(event.data);
     if (msg.type === "backend_echo") {
       addLine("backend", msg.text);
-      relayToContent(msg.text); // 백엔드 → content script 한 바퀴
+    } else if (msg.type === "command") {
+      // 백엔드가 내린 구조화 액션 → content로 중계 → 관측을 백엔드로 되돌림.
+      relayAction(msg.action);
+    } else if (msg.type === "observation_ack") {
+      addLine("backend", msg.text);
     } else if (msg.type === "stopped") {
       addLine("sys", "백엔드: 정지됨");
     }
   };
 }
 
-// 백엔드가 돌려준 메시지를 SW(라우터)를 거쳐 content script로 보내고, 그 응답을 표시.
-function relayToContent(text) {
-  chrome.runtime.sendMessage({ type: "relay_to_content", text }, (reply) => {
+// 백엔드 액션을 SW(라우터)를 거쳐 content로 보내고, 관측을 화면 표시 + 백엔드로 송신.
+function relayAction(action) {
+  chrome.runtime.sendMessage({ type: "relay_action", action }, (obs) => {
     if (chrome.runtime.lastError) {
       addLine("sys", "(content 전달 실패: " + chrome.runtime.lastError.message + ")");
       return;
     }
-    if (reply && reply.text) addLine("content", reply.text);
+    addLine("content", formatObservation(obs));
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "observation", observation: obs }));
+    }
   });
+}
+
+// 관측을 사람이 읽기 좋게 한 덩어리 텍스트로.
+function formatObservation(obs) {
+  if (!obs) return "(빈 응답)";
+  if (!obs.ok) return "✖ " + (obs.error || obs.note || "실패");
+  const parts = [];
+  if (obs.note) parts.push(obs.note);
+  if (obs.elements) parts.push(`요소 ${obs.elements.length}개:\n` + obs.elements.join("\n"));
+  if (obs.tables && obs.tables.length) parts.push(`표 ${obs.tables.length}개:\n` + obs.tables.join("\n\n"));
+  return parts.join("\n");
 }
 
 form.addEventListener("submit", (e) => {
@@ -70,6 +88,8 @@ stopBtn.addEventListener("click", () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "stop" }));
   }
+  // content의 실행 직전 취소 플래그도 켠다(§11 "클릭 직전 마지막 취소").
+  chrome.runtime.sendMessage({ type: "relay_stop" }, () => void chrome.runtime.lastError);
   input.disabled = true;
   stopBtn.disabled = true;
   addLine("sys", "STOP — 정지됨");
