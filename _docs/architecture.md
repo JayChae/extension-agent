@@ -433,7 +433,7 @@ maturity:
 
 | 레이어 | 선택 |
 |---|---|
-| 익스텐션 | Chrome MV3: `sidePanel` + 얇은 SW + `*.scourt.go.kr` content script(`all_frames:true`). permissions: `sidePanel, scripting, storage, debugger`(에스컬레이션 전용) |
+| 익스텐션 | Chrome MV3: `sidePanel` + 얇은 SW + `*.scourt.go.kr` content script(`all_frames:true`). permissions: `sidePanel, scripting, storage, debugger`(에스컬레이션 전용). host_permissions: `https://*.scourt.go.kr/*`(탭 URL 판별 + §11 도메인 allowlist) + 백엔드 `http://127.0.0.1:8000/*`(사이드패널 WS 연결) |
 | 백엔드 | Python **FastAPI**, WebSocket 1개 |
 | 에이전트 | **Pydantic AI 단일 Agent** (pydantic-graph 없음). `pydantic-ai-slim[anthropic]`, deferred tools |
 | 관측성 | **Pydantic Logfire** (`capabilities=[Instrumentation(...)]`, OpenTelemetry — 현재 공식 권장 방식. 구 `Agent(instrument=True)`는 현 공식문서에 더는 안 나옴 → 사용 금지) |
@@ -508,6 +508,7 @@ maturity:
 2. **`verify_success` 기준:** 타깃 task의 성공을 무엇으로 결정적 검증하나? (검증 *스키마*는 섹션 10에 구조화 — task별 값만 채우면 됨.)
 3. **전자소송 사이트(`ecfs.scourt.go.kr`)에 cross-origin iframe/OOPIF가 쓰이는가?** MVP 대상 화면(사건검색·결과표·송달문서·로그인)은 same-origin이라 MVP엔 영향 없음. 다른 화면에서 OOPIF가 쓰이면 그때 CDP flat-session 포함 여부를 검토.
 4. **감사 로그 보존:** 무결성(해시체인)은 전체에, 민감 페이로드는 접근통제+보존한도로 분리 저장이 충분한가, 별도 규정 요건이 있는가?
+5. **도메인 범위(전용 vs 범용):** MVP는 `*.scourt.go.kr` 전용 잠금(안전·집중 — §11). 오너가 범용 활용에도 관심. → 향후 **허용 도메인 목록을 설정값으로** 분리해 범용 확장(회사용=scourt, 개인용=원하는 사이트 추가). 단 `<all_urls>` 전면 개방은 금지 — allowlist는 프롬프트 인젝션·비가역 행동 방어의 하드 레일로 **유지**(§11). 메모리 레이아웃이 이미 사이트별(`sop/<site>/`)이라 확장 친화적.
 
 ---
 
