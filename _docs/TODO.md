@@ -13,9 +13,9 @@
 ---
 
 ## 📍 현재 위치
-> **Phase 4 구현·자동검증 완료 — 라이브 Claude 호출은 크레딧 충전 대기, 브라우저 풀루프·커밋은 사용자 검토 대기. 다음은 Phase 5.** "두뇌"가 붙었다: 백엔드의 임시 수동 파서를 **단일 Pydantic AI `agent.run()`** 가 대체했다(§5). 도구 perceive/click/type/select/navigate/scroll/extract/read_sop/done이 WS로 행동을 내리고 관측을 받아 루프를 돈다. 안전 가드레일 4종(스텝예산·무진전·연속실패·전역타임아웃)은 `Session`이 코드로 강제(§6). 관측은 `<UNTRUSTED_PAGE_DATA>` 펜스로 격리(§3). 루프+가드레일은 가짜 모델(FunctionModel)+가짜 브라우저(TestClient)로 8개 자동테스트 통과. 라이브 Sonnet은 요청 형식까지 확인됨(크레딧 부족 400에서 멈춤). 다음은 "막히면 묻는다"(§6 HITL — `ask_human`/DeferredToolRequests).
+> **Phase 5 구현·자동검증 완료 — 실제 scourt 브라우저 풀루프·커밋은 사용자 검토 대기. 다음은 Phase 6.** "막히면 묻는다"가 붙었다: 에이전트가 `ask_human(question, options)`를 부르면(Pydantic AI `CallDeferred`) 런이 `DeferredToolRequests`로 깔끔히 끝나고, 백엔드가 `all_messages()`를 보관 + 질문을 사이드패널로 푸시한다(§6). 사람이 카드에서 답하면(`human_answer`) `agent.run(message_history=..., deferred_tool_results=...)`로 **무상태 재개**한다. 질문 대기 중엔 메인 입력 잠금, STOP은 대기 상태·카드까지 정리. 루프(ask_human→답→재개)는 가짜 모델+가짜 브라우저로 자동테스트(10개 전체 통과, `backend/tests/test_loop.py`). deferred tools는 모델 무관이라 라이브도 가능(현재 OpenAI 임시 프로바이더로도 동작).
 >
-> ⚠️ **Phase 4 설계 델타 2건:** ① Anthropic은 thinking과 output 도구(`done`)를 **동시에 못 쓴다** → 결정적 done 종료를 위해 adaptive thinking은 끔(§12 권장과 충돌, 필요시 NativeOutput 전환 검토). ② 도구에 **`perceive` 추가**(첫 행동·navigate 직후 화면 재독용 — 계약상 1 command⇒1 observation이라 필요). extension 변경은 0.
+> ⚠️ **Phase 5 구현 메모:** ① 재개 상태는 **메모리(같은 WS 세션)에 보관** — 디스크 직렬화/재시작 생존은 durable 백엔드(§14-7, 후순위). ② `Session.resume()`은 wall-clock 타이머만 다시 잡고(사람이 생각한 시간은 타임아웃에 안 셈) `last_tool_sig`는 비운다(사람 답 직후 같은 동작이 와도 무진전 가드에 안 걸리게); steps/fails/관측해시는 보존해 전체 작업량 제한 유지. ③ 크리티컬 액션 강제 승인(`requires_approval`)은 이번 범위 밖 — "횡단 안전" 별도 항목.
 
 ---
 
@@ -85,12 +85,12 @@
 
 > 확신도 if문 아님. Pydantic AI 네이티브 `deferred tools`로 구현.
 
-- [ ] `ask_human(question, options)` → `DeferredToolRequests`로 런 종료
-- [ ] 백엔드가 `all_messages()` 직렬화 저장 + 질문을 사이드패널로 푸시
-- [ ] 사이드패널 질문/승인 카드 UI
-- [ ] 사람 답 → `agent.run(message_history=..., deferred_tool_results=...)`로 **무상태 재개** (durable 백엔드 불필요)
+- [x] `ask_human(question, options)` → `CallDeferred`로 `DeferredToolRequests`로 런 종료
+- [x] 백엔드가 `all_messages()` 보관(메모리) + 질문을 사이드패널로 푸시 — 디스크 직렬화는 durable 백엔드(§14-7) 후순위
+- [x] 사이드패널 질문 카드 UI(옵션 버튼 + 자유 입력, 대기 중 메인 입력 잠금) — 승인 카드 재사용 가능 형태
+- [x] 사람 답(`human_answer`) → `agent.run(message_history=..., deferred_tool_results=...)`로 **무상태 재개** (durable 백엔드 불필요). 재개 시 wall-clock만 리셋·`last_tool_sig`만 비움, 작업량 카운터는 보존
 
-**✅ 검증:** 에이전트가 모르는 지점에서 멈추고, 사람이 (분/시간 뒤) 답하면 그 자리에서 이어간다.
+**✅ 검증(달성):** 가짜 모델+가짜 브라우저로 `ask_human → 사람 답 → 그 자리에서 재개 → done`을 자동검증(10개 테스트 통과). resume()이 steps 보존·시계 리셋·last_tool_sig 클리어함도 단언. ⏳ 실제 scourt 브라우저에서 사람이 분/시간 뒤 답하는 풀루프는 사용자 검토 대기.
 
 ---
 
