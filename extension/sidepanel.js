@@ -78,10 +78,29 @@ function renderAskCard(question, options) {
   const card = document.createElement("div");
   card.className = "card";
 
+  const head = document.createElement("div");
+  head.className = "head";
   const q = document.createElement("div");
   q.className = "q";
   q.textContent = "🙋 " + (question || "(질문 없음)");
-  card.appendChild(q);
+  // 닫기: 이 질문은 됐고 다른 일을 시키고 싶을 때. 입력 잠금을 풀고 대기 상태를 비운다.
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "close";
+  close.textContent = "✕";
+  close.title = "질문 닫기";
+  close.addEventListener("click", () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "dismiss_question" }));
+    }
+    addLine("sys", "질문을 닫았습니다 — 다른 요청을 입력하세요.");
+    card.remove();
+    input.disabled = false;
+    input.focus();
+  });
+  head.appendChild(q);
+  head.appendChild(close);
+  card.appendChild(head);
 
   function answer(text) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;

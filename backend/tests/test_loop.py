@@ -182,6 +182,28 @@ def test_ask_human_resume(monkeypatch):
         assert done["text"].startswith("완료:") and "안산지원" in done["text"]
 
 
+# ---- T8b: 질문 닫기(dismiss) → 늦은 답 무시 → 새 작업 정상 시작 ---------------
+def test_dismiss_question(monkeypatch):
+    steps = [
+        ("perceive", {}),
+        ("ask_human", {"question": "법원?", "options": None}),
+        ("done", {"result": "재시작 완료"}),  # 닫은 뒤 새 user_input으로 시작되는 런이 도달
+    ]
+    monkeypatch.setattr(main, "MODEL", model_from(lambda i: steps[i]))
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "user_input", "text": "t1"})
+        assert ws.receive_json()["type"] == "command"  # perceive
+        ws.send_json({"type": "observation", "observation": ok_obs()})
+        assert ws.receive_json()["type"] == "ask_human"
+        # 질문을 닫는다 → 대기 상태가 비워져, 뒤늦은 답은 무시되고(재개 안 됨)
+        ws.send_json({"type": "dismiss_question"})
+        ws.send_json({"type": "human_answer", "text": "무시될 답"})
+        # 새 요청은 깨끗이 시작된다
+        ws.send_json({"type": "user_input", "text": "t2"})
+        result = drive(ws)
+    assert result.startswith("완료:") and "재시작 완료" in result
+
+
 # ---- T9: resume()는 steps 보존 + wall-clock 리셋 ------------------------------
 def test_resume_preserves_steps_resets_clock():
     s = Session(ws=None)

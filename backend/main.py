@@ -92,23 +92,25 @@ async def ws(websocket: WebSocket):
 
             elif mtype == "human_answer":
                 # ask_human 답을 받아 무상태로 재개한다(§6). 대기 중이 아니면 무시.
-                # pending_messages/pending_call_id는 항상 함께 세팅·해제되므로 하나만 검사.
                 if not session.pending_messages:
                     continue
                 results = DeferredToolResults()
                 results.calls[session.pending_call_id] = msg.get("text", "")
                 history = session.pending_messages
-                session.pending_messages = None
-                session.pending_call_id = None
+                session.clear_pending()
                 session.resume()
                 session.task = asyncio.create_task(
                     run_task(session, message_history=history, deferred_results=results)
                 )
 
+            elif mtype == "dismiss_question":
+                # 사람이 이 질문을 닫고 다른 일을 시키려 한다 → 대기 상태만 비운다.
+                # (런은 ask_human에서 이미 종료됐으므로 취소할 태스크는 없다.)
+                session.clear_pending()
+
             elif mtype == "stop":
                 session.stopped = True
-                session.pending_messages = None
-                session.pending_call_id = None
+                session.clear_pending()
                 if session.task and not session.task.done():
                     session.task.cancel()
                 await websocket.send_json({"type": "stopped"})

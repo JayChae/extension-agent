@@ -85,10 +85,14 @@ class Session:
         self.started_at = time.monotonic()
         self.recent_hashes.clear()
         self.last_tool_sig = None
-        self.pending_messages = None
-        self.pending_call_id = None
+        self.clear_pending()
         while not self.obs_q.empty():
             self.obs_q.get_nowait()
+
+    def clear_pending(self) -> None:
+        """ask_human 대기 상태를 비운다. 두 필드는 항상 함께 세팅·해제된다(재개·닫기·STOP·reset 공통)."""
+        self.pending_messages = None
+        self.pending_call_id = None
 
     def resume(self) -> None:
         """ask_human 답을 받아 재개하기 직전. wall-clock만 다시 잡고(사람이 생각한 시간은
