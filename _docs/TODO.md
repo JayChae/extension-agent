@@ -13,9 +13,9 @@
 ---
 
 ## 📍 현재 위치
-> **Phase 5 구현·자동검증 완료 — 실제 scourt 브라우저 풀루프·커밋은 사용자 검토 대기. 다음은 Phase 6.** "막히면 묻는다"가 붙었다: 에이전트가 `ask_human(question, options)`를 부르면(Pydantic AI `CallDeferred`) 런이 `DeferredToolRequests`로 깔끔히 끝나고, 백엔드가 `all_messages()`를 보관 + 질문을 사이드패널로 푸시한다(§6). 사람이 카드에서 답하면(`human_answer`) `agent.run(message_history=..., deferred_tool_results=...)`로 **무상태 재개**한다. 질문 대기 중엔 메인 입력 잠금, STOP은 대기 상태·카드까지 정리. 루프(ask_human→답→재개)는 가짜 모델+가짜 브라우저로 자동테스트(10개 전체 통과, `backend/tests/test_loop.py`). deferred tools는 모델 무관이라 라이브도 가능(현재 OpenAI 임시 프로바이더로도 동작).
+> **Phase 6 구현·자동검증 완료 — 실제 scourt 시연·라이브 Opus 증류·커밋은 사용자 검토 대기. 다음은 Phase 7.** "가르치면 기억한다"가 붙었다: 사이드패널 "가르치기" 버튼 → 작은 입력창에 업무 이름 → 사람이 브라우저에서 직접 시연(+설명 추가) → content.js가 행동마다 `{kind:action, role/name/text/cue/value/url}`을 기록(XPath 아님, 비밀값 블랭킹)해 사이드패널로 즉시 송신 → 종료 시 `record_demo`로 백엔드 전송. **메모리 전담 에이전트**(`memory_agent.py`, Opus)가 행동+설명 trace를 `SopDraft`(구조화 출력)로 증류 → `propose_sop` diff를 승인 카드로 → 사람 원클릭 승인 → harness(`memory_store.py`)가 SOP 파일+`master_index.json`을 **같은 git commit으로 원자적 기록**(모델은 파일 안 씀, §9). 다음 런에서 `route()`가 결정적 라우팅 → `read_sop` 힌트 주입. 가짜 모델+임시 git repo로 자동테스트(16개 전체 통과, `backend/tests/test_learning.py` 포함).
 >
-> ⚠️ **Phase 5 구현 메모:** ① 재개 상태는 **메모리(같은 WS 세션)에 보관** — 디스크 직렬화/재시작 생존은 durable 백엔드(§14-7, 후순위). ② `Session.resume()`은 wall-clock 타이머만 다시 잡고(사람이 생각한 시간은 타임아웃에 안 셈) `last_tool_sig`는 비운다(사람 답 직후 같은 동작이 와도 무진전 가드에 안 걸리게); steps/fails/관측해시는 보존해 전체 작업량 제한 유지. ③ 크리티컬 액션 강제 승인(`requires_approval`)은 이번 범위 밖 — "횡단 안전" 별도 항목.
+> ⚠️ **Phase 6 구현 메모:** ① **수행 vs 학습 에이전트 분리**(사용자 지시) — 수행은 Sonnet 스텝 루프(`agent.py`), 학습은 **메모리 전담 Opus 에이전트**(`memory_agent.py`)가 별도로. 후자가 앞으로 모든 메모리 쓰기 *제안*의 집(Phase 7 교정→레슨 재사용). ② "가르치기"는 스텝 루프와 분리된 **harness 파이프라인**(`propose_sop_diff`를 스텝 루프 도구로 두지 않음) — 시연 중엔 도는 `agent.run()`이 없고, 모델은 쓰기 경로에 못 들어옴(§9 인젝션 방어). ③ **시연=행동+사람 설명**(사용자 지시) — 녹화 중 "설명 추가"로 의미/조건을 함께 적어 `events[]`에 시간순으로 엮음 → 모델이 조건·분기를 학습, 미해결 분기는 `open_branches`(TODO). 승인 카드에서 분기 설명을 더 적으면 레슨으로 첨부. ④ 증류는 별도 asyncio 태스크(STOP 취소·receive 루프 응답성 유지), git은 `asyncio.to_thread`. ⑤ 라우팅은 MVP 약한 휴리스틱(SOP 여럿이면 오라우팅 가능 — 향후 강화). ⑥ 신규 의존성 `pyyaml`(프론트매터 렌더). ⑦ 라이브 Opus 증류는 크레딧 사정상 `MEMORY_MODEL`/`AGENT_MODEL`로 임시 프로바이더 교체 가능.
 
 ---
 
@@ -98,15 +98,15 @@
 
 > 시스템을 RPA가 아니라 "신입사원"으로 만드는 핵심.
 
-- [ ] 메모리 레이아웃: `memory/master_index.json` + `sop/scourt.go.kr/` (§9)
-- [ ] 사이드패널 "Show me" 버튼 → content script가 행동마다 녹화 (역할+이름+텍스트+주변단서+입력값, **XPath 아님**) (§7)
-- [ ] **Opus 4.8**이 증류 → 특정값을 `{슬롯}`으로 파라미터화, 미해결 분기는 TODO 빈칸으로 명시 (§7, §12)
-- [ ] `propose_sop_diff` → 사이드패널에 diff → **사람 원클릭 승인** (= 학습 순간 + 인젝션 잠금) (§7)
-- [ ] 승인 시 harness가 파일+인덱스를 같은 git commit으로 원자적 기록 (모델이 직접 안 씀) (§9)
-- [ ] SOP 프론트매터: `goal / input_slots / verify / maturity(level=LEARNING)` (§9)
-- [ ] 다음 런에서 `master_index.json`으로 라우팅 → `read_sop`로 지연 로딩 (§8)
+- [x] 메모리 레이아웃: `memory/master_index.json` + `sop/<site>/`(첫 승인 시 생성) (§9) — 사이트는 녹화 url에서 추론(하드코딩 아님)
+- [x] 사이드패널 "가르치기" 버튼 → content script가 행동마다 녹화 (역할+이름+텍스트+주변단서+입력값, **XPath 아님**, 비밀값 블랭킹) + **설명 추가**(행동+의미를 함께) (§7)
+- [x] **메모리 전담 에이전트(Opus)**가 증류 → 특정값을 `{슬롯}`으로 파라미터화, 미해결 분기는 `open_branches`(TODO 빈칸) (§7, §12)
+- [x] `propose_sop`(harness 파이프라인) → 사이드패널에 diff 승인 카드 → **사람 원클릭 승인** (= 학습 순간 + 인젝션 잠금) (§7)
+- [x] 승인 시 harness가 파일+인덱스를 같은 git commit으로 원자적 기록 (모델이 직접 안 씀) (§9)
+- [x] SOP 프론트매터: `goal / input_slots / verify / maturity(level=LEARNING)` (§9) — yaml 렌더(`pyyaml`)
+- [x] 다음 런에서 `master_index.json`으로 라우팅(`route()`) → `read_sop` 힌트 주입 (§8)
 
-**✅ 검증:** 사건검색을 "Show me"로 1회 시연 → 승인 → git 커밋 → **다음 런에서 그 SOP를 불러와** 같은 일을 한다.
+**✅ 검증(자동 달성):** 시연(`record_demo`)→증류·제안(`propose_sop`)→승인(`approve_sop`)→git 커밋(단일·해당 2경로만)→`route()` 라우팅→`read_sop` 로딩→다음 런 힌트 주입을, 가짜 모델·임시 git repo로 자동검증(16개 통과, `backend/tests/test_learning.py`). ⏳ 실제 scourt 시연 + 라이브 Opus 증류 풀루프는 사용자 검토 대기(크레딧·브라우저 필요).
 
 ---
 

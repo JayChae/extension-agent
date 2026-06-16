@@ -26,6 +26,10 @@
         font-size: 11px;
         color: #888;
       }
+      header .btns {
+        display: flex;
+        gap: 6px;
+      }
       #stop {
         background: #c0392b;
         color: #fff;
@@ -37,6 +41,17 @@
       #stop:disabled {
         opacity: 0.5;
         cursor: default;
+      }
+      #teach {
+        background: #e67e22;
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        padding: 4px 10px;
+        cursor: pointer;
+      }
+      #teach.recording {
+        background: #b9770e;
       }
       #log {
         flex: 1;
@@ -127,7 +142,10 @@
     <header>
       <h1>AI 신입사원</h1>
       <span id="status">연결 중…</span>
-      <button id="stop" type="button">STOP</button>
+      <div class="btns">
+        <button id="teach" type="button">가르치기</button>
+        <button id="stop" type="button">STOP</button>
+      </div>
     </header>
     <div id="log"></div>
     <form id="form">

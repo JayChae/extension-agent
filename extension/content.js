@@ -271,6 +271,140 @@ async function executeAction(action) {
   }
 }
 
+// ───────────────────────── 녹화(Recording) — "가르치기"(§7 경로①) ─────────────────────────
+// 사람이 직접 하는 행동을 역할+이름+텍스트+주변단서+입력값으로 기록(XPath 아님). 비밀값은 블랭킹.
+// content는 버퍼를 안 가짐 — 행동마다 사이드패널로 즉시 송신(페이지 이동에 사이드패널은 생존).
+
+let recording = false;
+
+// 텍스트 입력류인지(버튼/체크박스/파일 등 제외) — change에서 type으로 기록할 대상.
+function isTextInput(el) {
+  if (el.tagName === "TEXTAREA" || el.isContentEditable) return true;
+  if (el.tagName !== "INPUT") return false;
+  const t = (el.getAttribute("type") || "text").toLowerCase();
+  return !["button", "submit", "checkbox", "radio", "hidden", "file", "reset", "image"].includes(t);
+}
+
+// 비밀값 필드 — 값 블랭킹(§3·§11). password + 자격증명/인증서 추정 id·name.
+function isSensitive(el) {
+  if (el.tagName === "INPUT" && (el.getAttribute("type") || "").toLowerCase() === "password") return true;
+  const key = ((el.id || "") + " " + (el.getAttribute("name") || "")).toLowerCase();
+  return /pass|pwd|pin|secret|cert|인증|비밀/.test(key);
+}
+
+// 기록용 역할 문자열 — role 속성 우선, 없으면 태그/타입에서 유도.
+function recordRole(el) {
+  const role = (el.getAttribute("role") || "").toLowerCase();
+  if (role) return role;
+  const tag = el.tagName;
+  if (tag === "A") return "link";
+  if (tag === "BUTTON") return "button";
+  if (tag === "SELECT") return "combobox";
+  if (tag === "TEXTAREA") return "textbox";
+  if (tag === "INPUT") {
+    const t = (el.getAttribute("type") || "text").toLowerCase();
+    if (t === "button" || t === "submit" || t === "image") return "button";
+    if (t === "checkbox") return "checkbox";
+    if (t === "radio") return "radio";
+    return "textbox";
+  }
+  return tag.toLowerCase();
+}
+
+// 주변 단서 — 감싸는 fieldset legend나 섹션 aria-label(있으면). 최소만.
+function nearestCue(el) {
+  const fs = el.closest("fieldset");
+  if (fs) {
+    const lg = fs.querySelector("legend");
+    if (lg && lg.textContent.trim()) return stripMarkers(lg.textContent.replace(/\s+/g, " ").trim()).slice(0, 60);
+  }
+  const sec = el.closest("section,[role=region],[role=dialog],[aria-label]");
+  const al = sec && sec.getAttribute("aria-label");
+  if (al && al.trim()) return stripMarkers(al.trim()).slice(0, 60);
+  return "";
+}
+
+// 클릭에서 의미 있는 컨트롤(버튼/링크/체크/라디오/옵션 등)을 조상에서 찾는다. 텍스트입력/select는 제외(change가 담당).
+function clickableAncestor(el) {
+  for (let p = el; p; p = p.parentElement) {
+    const tag = p.tagName;
+    if (tag === "TEXTAREA" || tag === "SELECT") return null;
+    if (tag === "INPUT") {
+      const t = (p.getAttribute("type") || "text").toLowerCase();
+      if (["button", "submit", "image", "checkbox", "radio"].includes(t)) return p;
+      return null; // 텍스트 입력 클릭은 무시(입력은 change에서)
+    }
+    if (tag === "BUTTON") return p;
+    if (tag === "A" && p.hasAttribute("href")) return p;
+    const role = (p.getAttribute("role") || "").toLowerCase();
+    if (INTERACTIVE_ROLES.has(role)) return p;
+    if (p.hasAttribute("onclick")) return p;
+    const cls = p.className && typeof p.className === "string" ? p.className : "";
+    if (EXB_INTERACTIVE.test(p.id || "") || EXB_INTERACTIVE.test(cls)) return p;
+  }
+  return null;
+}
+
+function buildRecord(action, el, value) {
+  const name = stripMarkers(accessibleName(el));
+  return {
+    kind: "action",
+    action,
+    role: recordRole(el),
+    name: name.slice(0, 80),
+    text: stripMarkers((el.textContent || "").replace(/\s+/g, " ").trim()).slice(0, 80),
+    cue: nearestCue(el),
+    value: value === undefined ? undefined : String(value).slice(0, 120),
+    url: location.href,
+    title: document.title,
+  };
+}
+
+function emitRecord(record) {
+  try {
+    chrome.runtime.sendMessage({ type: "record_action", record });
+  } catch {
+    /* 사이드패널이 닫혔으면 무시 */
+  }
+}
+
+function onClickCapture(e) {
+  if (!recording) return;
+  const el = clickableAncestor(e.target);
+  if (el) emitRecord(buildRecord("click", el, undefined));
+}
+
+function onChangeCapture(e) {
+  if (!recording) return;
+  const el = e.target;
+  if (el.tagName === "SELECT") {
+    const opt = el.selectedOptions && el.selectedOptions[0];
+    emitRecord(buildRecord("select", el, opt ? opt.text.trim() : el.value));
+  } else if (isTextInput(el)) {
+    const raw = el.isContentEditable ? el.textContent : el.value;
+    emitRecord(buildRecord("type", el, isSensitive(el) ? "***" : raw || ""));
+  }
+}
+
+function startRecording() {
+  if (recording) return;
+  recording = true;
+  document.addEventListener("click", onClickCapture, true);
+  document.addEventListener("change", onChangeCapture, true);
+}
+
+function stopRecording() {
+  recording = false;
+  document.removeEventListener("click", onClickCapture, true);
+  document.removeEventListener("change", onChangeCapture, true);
+}
+
+// 페이지가 이동·재주입돼도 녹화를 이어가기: SW가 열어둔 storage.session 플래그를 보고 자가 시작.
+chrome.storage.session.get("recording", (r) => {
+  if (chrome.runtime.lastError) return; // 접근수준 미설정 등 — 조용히 통과(녹화 안 함)
+  if (r && r.recording) startRecording();
+});
+
 // ───────────────────────── 메시징 ─────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -280,6 +414,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === "do_stop") {
     stopped = true;
+    stopRecording();
     sendResponse({ ok: true, note: "content STOP 플래그 ON" });
+  }
+  if (msg.type === "do_record_start") {
+    startRecording();
+    sendResponse({ ok: true, note: "녹화 시작" });
+  }
+  if (msg.type === "do_record_stop") {
+    stopRecording();
+    sendResponse({ ok: true, note: "녹화 종료" });
   }
 });

@@ -145,7 +145,7 @@
 | `search_memory(query)` | 레슨·gotchas·과거 케이스 벡터 검색 |
 | `fill_credential(index, kind)` | 로그인 ID·비번·**공동인증서 PIN** 입력 — 금고에서 비밀값을 꺼내 직접 입력(모델은 값을 못 봄, `kind`만 지정) |
 | **`ask_human(question)`** | 모를 때 사수에게 질문 (멈춤) |
-| `propose_sop_diff(diff)` | 배운 걸 노트에 적기 (사람 승인 후 저장) |
+| `propose_sop_diff(diff)` | 배운 걸 노트에 적기 (사람 승인 후 저장). *Phase 6 실현:* 스텝 루프 도구가 아니라 **harness 파이프라인**(시연→메모리 전담 에이전트 증류→`propose_sop` 카드→승인→git)으로 구현 — 시연 중엔 도는 `agent.run()`이 없고, 모델은 쓰기 경로에 못 들어옴(§7·§9) |
 | `verify_success(criteria)` | 잘 됐는지 자기검증(졸업 집계용) |
 | `done(result)` | 완료 선언 — *Phase 4 구현*: 일반 도구가 아니라 **output 도구**(`ToolOutput`)로 호출되면 런이 끝나고 `result.output`이 됨 |
 
@@ -183,6 +183,8 @@ def submit_document(...): ...
 ## 7. 학습 루프 — 시스템의 심장
 
 **"가르치면 기억하고 점점 잘하게 된다"** — 이 시스템을 RPA가 아니라 AI 신입사원으로 만드는 부분. 비모델 코드는 *파일 I/O + git + 임베딩 검색*뿐, 모든 지능은 강한 모델(Opus 4.8)이 도구로 수행.
+
+> **Phase 6 구현 형태(확정):** 학습은 수행과 **분리된 전용 에이전트**가 한다 — 수행은 Sonnet 스텝 루프(`agent.py`), 학습은 **메모리 전담 Opus 에이전트**(`memory_agent.py`)가 별도로(이 파일이 앞으로 모든 메모리 쓰기 *제안*의 집 — 경로②③ 레슨·화해도 여기 재사용). 시연은 **행동 + 사람의 설명(내레이션)을 함께** 기록해(`{kind:action|note}` 시간순) 모델이 조건·분기를 배우게 한다 — 행동만 녹화하면 분기 없는 매크로가 된다. 증류·승인·기록은 스텝 루프가 아니라 harness 파이프라인(`record_demo`→`distill`→`propose_sop`→`approve_sop`→`memory_store`가 git 원자 커밋).
 
 ### 세 신호 → 증류 → 화해 → 승인 → git
 

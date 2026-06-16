@@ -4,6 +4,16 @@ chrome.runtime.onInstalled.addListener(() => {
     .catch((err) => console.error(err));
 });
 
+// content script가 storage.session의 "recording" 플래그를 읽을 수 있게 한다(녹화 자가 시작용, §7).
+// 기본 접근수준은 신뢰 컨텍스트 전용이라 content엔 안 보임 → 확장해 준다.
+function allowContentSessionAccess() {
+  chrome.storage.session
+    .setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })
+    .catch((err) => console.error(err));
+}
+chrome.runtime.onInstalled.addListener(allowContentSessionAccess);
+chrome.runtime.onStartup.addListener(allowContentSessionAccess);
+
 // 얇은 라우터: 사이드패널 → 활성 scourt 탭의 content script로 중계. 추론 루프 없음.
 const SCOURT_HOST = /(^|\.)scourt\.go\.kr$/;
 
@@ -17,6 +27,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     routeToContent({ type: "do_stop" }).then(sendResponse);
     return true;
   }
+  // "가르치기" 녹화 시작/종료를 현재 scourt 탭의 content로 중계(§7). storage 플래그는 사이드패널이 세팅.
+  if (msg.type === "record_start") {
+    routeToContent({ type: "do_record_start" }).then(sendResponse);
+    return true;
+  }
+  if (msg.type === "record_stop") {
+    routeToContent({ type: "do_record_stop" }).then(sendResponse);
+    return true;
+  }
+  // record_action(content→사이드패널)은 SW가 처리하지 않는다 — 사이드패널이 직접 받는다.
 });
 
 async function routeToContent(payload) {

@@ -75,6 +75,7 @@ class Session:
     last_tool_sig: str | None = None
     pending_messages: list | None = None  # ask_human 대기 중 보관하는 message_history(§6)
     pending_call_id: str | None = None  # 재개 시 답을 매칭할 ask_human tool_call_id
+    pending_sop: dict | None = None  # 승인 대기 중인 SOP 제안 {site, name, draft}(§7 학습)
 
     def reset(self) -> None:
         """새 작업 시작 직전 카운터 초기화 + 잔여 관측 비우기."""
@@ -85,6 +86,7 @@ class Session:
         self.started_at = time.monotonic()
         self.recent_hashes.clear()
         self.last_tool_sig = None
+        self.pending_sop = None
         self.clear_pending()
         while not self.obs_q.empty():
             self.obs_q.get_nowait()
