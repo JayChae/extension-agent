@@ -1,62 +1,17 @@
+"""FastAPI 앱 + /ws — 단일 에이전트 루프의 배관(§5).
+
+수신 루프는 클라이언트 프레임만 읽어 라우팅한다. 추론은 agent.run()이 별도 asyncio 태스크에서
+돌고, 관측은 obs_q로 도구에 배달된다. user_input이 런을 시작, observation이 큐를 채우고, stop이 취소한다.
+"""
+
+import asyncio
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
+from agent import MODEL, agent
+from session import RunHalted, Session, Stopped
+
 app = FastAPI()
-
-USAGE = (
-    "명령: perceive | click N | type N <텍스트> | select N <옵션> | "
-    "navigate <url> | scroll up|down | extract <질의>"
-)
-
-
-def parse_command(text: str) -> dict | None:
-    """채팅 한 줄을 구조화 액션으로 파싱.
-
-    Phase 3 임시 스캐폴딩 — Phase 4에서 Pydantic AI agent.run()이 이 자리를 대체한다.
-    무효 입력이면 None.
-    """
-    parts = text.strip().split(maxsplit=1)
-    if not parts:
-        return None
-    cmd = parts[0].lower()
-    rest = parts[1] if len(parts) > 1 else ""
-
-    if cmd == "perceive":
-        return {"kind": "perceive"}
-    if cmd == "navigate" and rest:
-        return {"kind": "navigate", "url": rest}
-    if cmd == "scroll":
-        return {"kind": "scroll", "dir": "up" if rest.strip() == "up" else "down"}
-    if cmd == "extract":
-        return {"kind": "extract", "query": rest}
-
-    # 인덱스를 받는 명령: click / type / select
-    if cmd in ("click", "type", "select"):
-        idx_str, _, arg = rest.partition(" ")
-        if not idx_str.isdigit():
-            return None
-        index = int(idx_str)
-        if cmd == "click":
-            return {"kind": "click", "index": index}
-        if cmd == "type":
-            return {"kind": "type", "index": index, "text": arg}
-        if cmd == "select":
-            return {"kind": "select", "index": index, "option": arg}
-    return None
-
-
-def format_observation(obs: dict) -> str:
-    """content 관측을 받았다는 짧은 확인(왕복 증명용).
-
-    전체 요소 목록은 사이드패널이 이미 화면에 보여주므로, 백엔드 회신은 중복 덤프 없이
-    개수만 요약한다.
-    """
-    if not obs or not obs.get("ok"):
-        return "✖ " + str((obs or {}).get("error") or (obs or {}).get("note") or "실패")
-    n_el = len(obs.get("elements") or [])
-    n_tb = len(obs.get("tables") or [])
-    head = f"✓ 백엔드 수신: 요소 {n_el}개, 표 {n_tb}개"
-    note = obs.get("note")
-    return f"{head} · {note}" if note else head
 
 
 @app.get("/")
@@ -64,29 +19,52 @@ def health():
     return {"status": "ok"}
 
 
+async def run_task(session: Session, task_text: str) -> None:
+    """agent.run() 한 번을 감싸 종료를 처리한다. done이면 결과를, 가드레일이면 사유를 사용자에게 보고."""
+    try:
+        result = await agent.run(task_text, deps=session, model=MODEL)
+        await session.ws.send_json({"type": "backend_echo", "text": f"완료: {result.output}"})
+        usage = result.usage
+        print(  # 캐시 동작 검증용 로깅(§12)
+            f"[cache] read={getattr(usage, 'cache_read_tokens', None)} "
+            f"write={getattr(usage, 'cache_write_tokens', None)}"
+        )
+    except Stopped:
+        pass  # STOP은 이미 클라이언트에 통지됨
+    except RunHalted as e:
+        await session.ws.send_json({"type": "backend_echo", "text": f"중단(가드레일): {e.reason}"})
+    except asyncio.CancelledError:
+        raise  # STOP 취소 경로
+    except Exception as e:  # 모델/네트워크 예외
+        await session.ws.send_json({"type": "backend_echo", "text": f"오류: {e}"})
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
-    """사이드패널 ↔ 백엔드 양방향 채널.
-
-    Phase 3: 채팅 명령을 파싱해 구조화 액션을 내려보내고(command),
-    content가 실행 후 돌려준 관측(observation)을 포맷해 회신한다(observation_ack).
-    추론 루프는 없음 — Phase 4에서 agent.run()이 들어온다.
-    """
     await websocket.accept()
+    session = Session(ws=websocket)
     try:
         while True:
             msg = await websocket.receive_json()
             mtype = msg.get("type")
+
             if mtype == "user_input":
-                action = parse_command(msg.get("text", ""))
-                if action is None:
-                    await websocket.send_json({"type": "backend_echo", "text": USAGE})
-                else:
-                    await websocket.send_json({"type": "command", "action": action})
+                if session.task and not session.task.done():
+                    await websocket.send_json(
+                        {"type": "backend_echo", "text": "이미 작업이 진행 중입니다."}
+                    )
+                    continue
+                session.reset()
+                session.task = asyncio.create_task(run_task(session, msg.get("text", "")))
+
             elif mtype == "observation":
-                text = format_observation(msg.get("observation") or {})
-                await websocket.send_json({"type": "observation_ack", "text": text})
+                await session.obs_q.put(msg.get("observation") or {})
+
             elif mtype == "stop":
+                session.stopped = True
+                if session.task and not session.task.done():
+                    session.task.cancel()
                 await websocket.send_json({"type": "stopped"})
     except WebSocketDisconnect:
-        pass
+        if session.task and not session.task.done():
+            session.task.cancel()
