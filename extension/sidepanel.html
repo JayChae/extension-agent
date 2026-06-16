@@ -3,8 +3,88 @@
   <head>
     <meta charset="utf-8" />
     <title>AI 신입사원</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        border-bottom: 1px solid #ddd;
+      }
+      header h1 {
+        font-size: 14px;
+        margin: 0;
+      }
+      #status {
+        font-size: 11px;
+        color: #888;
+      }
+      #stop {
+        background: #c0392b;
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        padding: 4px 10px;
+        cursor: pointer;
+      }
+      #stop:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      #log {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px 10px;
+        font-size: 13px;
+      }
+      .line {
+        margin: 2px 0;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .user {
+        color: #1565c0;
+      }
+      .backend {
+        color: #2e7d32;
+      }
+      .content {
+        color: #6a1b9a;
+      }
+      .sys {
+        color: #999;
+        font-style: italic;
+      }
+      form {
+        display: flex;
+        gap: 6px;
+        padding: 8px 10px;
+        border-top: 1px solid #ddd;
+      }
+      #text {
+        flex: 1;
+        padding: 6px;
+      }
+    </style>
   </head>
   <body>
-    <p>AI 신입사원 — 준비 완료</p>
+    <header>
+      <h1>AI 신입사원</h1>
+      <span id="status">연결 중…</span>
+      <button id="stop" type="button">STOP</button>
+    </header>
+    <div id="log"></div>
+    <form id="form">
+      <input id="text" type="text" placeholder="메시지를 입력하세요" autocomplete="off" />
+      <button type="submit">보내기</button>
+    </form>
+    <script src="sidepanel.js"></script>
   </body>
 </html>

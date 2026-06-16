@@ -3,6 +3,7 @@
   "name": "AI 신입사원",
   "version": "0.1.0",
   "permissions": ["sidePanel", "scripting", "storage"],
+  "host_permissions": ["https://*.scourt.go.kr/*", "http://127.0.0.1:8000/*"],
   "action": {},
   "background": {
     "service_worker": "background.js",

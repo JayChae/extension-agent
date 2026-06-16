@@ -13,7 +13,7 @@
 ---
 
 ## 📍 현재 위치
-> **Phase 1 완료 — 커밋/PR 검토 대기. 다음은 Phase 2.** 지각 기반(scourt 컨트롤 = 네이티브 태그 위주, §3)은 확정. 레포·개발환경 골격이 깔렸고, 다음은 "메시지 한 바퀴"(SW↔백엔드↔content script echo) 배관.
+> **Phase 2 구현·자동검증 완료 — 브라우저 풀루프 확인 + 커밋은 사용자 검토 대기. 다음은 Phase 3.** "메시지 한 바퀴"(사이드패널↔백엔드 WS, 사이드패널↔SW↔content) 배관이 통했다(백엔드 echo는 일회용 WS 클라이언트로 자동검증). 다음은 "손과 눈"(§3 지각 인덱스 + §4 행동 실행기).
 
 ---
 
@@ -29,7 +29,7 @@
 - [x] 익스텐션 골격: `manifest.json`(MV3, permissions `sidePanel/scripting/storage`, 툴바클릭→패널 `action`), 빈 사이드패널 HTML, 얇은 SW, content script 등록(`*.scourt.go.kr` — 주 사이트 `ecfs.scourt.go.kr`)
 - [x] (선택) 린트/포맷: 백엔드 `ruff`
 - [x] `README.md`: 로컬 실행법 — 백엔드 띄우기 / 크롬에 익스텐션 "압축해제 로드"
-- [ ] 첫 커밋 ← 사용자 검토 후 진행 (phase-1 브랜치 → PR)
+- [x] 첫 커밋 — phase-1 PR(#2)로 머지 완료
 
 **✅ 검증:** `uv run uvicorn ...`로 백엔드가 뜨고, 크롬 `chrome://extensions`에서 익스텐션이 (빈 사이드패널이라도) 정상 로드된다. `.env`는 git에 안 올라간다(`git status`로 확인).
 
@@ -39,11 +39,12 @@
 
 > 두뇌·학습 다 빼고, **"버튼 누르면 → 백엔드 갔다 → 화면에 돌아온다"** 배관만 먼저 통한다.
 
-- [ ] WebSocket 1개 엔드포인트 (사이드패널 ↔ 백엔드 양방향)
-- [ ] 얇은 SW: 툴바클릭→패널오픈, tabId 등록, 라우팅만 (**추론 루프 없음**)
-- [ ] content script(`all_frames:true`) ↔ 사이드패널 메시징
-- [ ] 사이드패널에 채팅창 + **STOP 킬스위치** 자리 (§11 — 안전은 처음부터)
-- [ ] content script ↔ 사이드패널 ↔ 백엔드 왕복 echo 한 번
+- [x] WebSocket 1개 엔드포인트 (사이드패널 ↔ 백엔드 양방향) — JSON 메시지(`{type,text}`)
+- [x] 얇은 SW: 툴바클릭→패널오픈, 활성 scourt 탭 해석, 라우팅만 (**추론 루프 없음**) — tabId 영구 등록(`storage.session`)은 안정 대상이 필요한 P3/4로 이연(SW idle-kill 대비)
+- [x] content script(`all_frames:true`) ↔ 사이드패널 메시징 — SW가 `frameId:0` 최상위 프레임만 겨냥(응답 모호성 제거). 이미 열려 있던 탭엔 손이 없어 → SW가 `content.js` 1회 주입 후 재시도(검증 중 발견·보강, 새로고침 불필요)
+- [x] 사이드패널에 채팅창 + **STOP 킬스위치** 자리 (§11) — STOP=stop 송신+입력잠금+재연결 차단(실제 "클릭 직전 취소"는 행동 실행기 생기는 P3/4)
+- [x] content script ↔ 사이드패널 ↔ 백엔드 왕복 echo 한 번
+- [x] (구현 중 추가) manifest `host_permissions`: `https://*.scourt.go.kr/*`(탭 URL 판별) + `http://127.0.0.1:8000/*`(WS 연결) — §11 도메인 allowlist 씨앗
 
 **✅ 검증:** 사이드패널에서 글자 보내면 → 백엔드 거쳐 → content script가 받고 → 응답이 사이드패널에 돌아온다. (추론 루프 없음, SW에 추론 없음)
 
