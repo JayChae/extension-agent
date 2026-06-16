@@ -73,6 +73,8 @@ class Session:
     budget: int = DEFAULT_STEP_BUDGET
     recent_hashes: deque = field(default_factory=lambda: deque(maxlen=NO_PROGRESS_WINDOW))
     last_tool_sig: str | None = None
+    pending_messages: list | None = None  # ask_human 대기 중 보관하는 message_history(§6)
+    pending_call_id: str | None = None  # 재개 시 답을 매칭할 ask_human tool_call_id
 
     def reset(self) -> None:
         """새 작업 시작 직전 카운터 초기화 + 잔여 관측 비우기."""
@@ -83,8 +85,22 @@ class Session:
         self.started_at = time.monotonic()
         self.recent_hashes.clear()
         self.last_tool_sig = None
+        self.clear_pending()
         while not self.obs_q.empty():
             self.obs_q.get_nowait()
+
+    def clear_pending(self) -> None:
+        """ask_human 대기 상태를 비운다. 두 필드는 항상 함께 세팅·해제된다(재개·닫기·STOP·reset 공통)."""
+        self.pending_messages = None
+        self.pending_call_id = None
+
+    def resume(self) -> None:
+        """ask_human 답을 받아 재개하기 직전. wall-clock만 다시 잡고(사람이 생각한 시간은
+        타임아웃에 안 셈) steps/fails/관측해시는 보존해 전체 작업량 제한은 유지한다(§6).
+        단 last_tool_sig는 비운다 — 사람 답은 정당한 상태 변화라, 답 직후 같은 동작이 와도
+        '같은 동작 반복' 무진전 가드에 걸리면 안 된다(ask_human이 풀어준 분기를 다시 막는 꼴)."""
+        self.started_at = time.monotonic()
+        self.last_tool_sig = None
 
     def _guard_before(self, action: dict) -> None:
         if self.stopped:

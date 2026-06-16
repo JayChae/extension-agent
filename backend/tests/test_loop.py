@@ -6,12 +6,15 @@
 - 브라우저: TestClient websocket이 extension 역할 — command를 받으면 canned observation으로 답한다.
 """
 
+import time
+
 import main
 import session as session_mod
 from agent import render_observation
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
+from session import Session
 
 client = TestClient(main.app)
 
@@ -151,6 +154,67 @@ def test_stop(monkeypatch):
         ws.send_json({"type": "stop"})
         msg = ws.receive_json()
         assert msg["type"] == "stopped"
+
+
+# ---- T8: ask_human → 사람 답 → 무상태 재개 (§6 HITL) --------------------------
+def test_ask_human_resume(monkeypatch):
+    # 같은 FunctionModel 인스턴스가 두 런(최초+재개)에 걸쳐 호출된다 → state["i"]가 이어진다.
+    steps = [
+        ("perceive", {}),
+        ("ask_human", {"question": "어느 법원을 고를까요?", "options": ["안산지원", "본원"]}),
+        ("done", {"result": "안산지원으로 진행 완료"}),
+    ]
+    monkeypatch.setattr(main, "MODEL", model_from(lambda i: steps[i]))
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "user_input", "text": "사건 검색해줘"})
+        cmd = ws.receive_json()  # perceive command
+        assert cmd["type"] == "command"
+        ws.send_json({"type": "observation", "observation": ok_obs()})
+        # ask_human → 런이 DeferredToolRequests로 종료 → 질문 프레임이 온다.
+        q = ws.receive_json()
+        assert q["type"] == "ask_human"
+        assert q["question"] == "어느 법원을 고를까요?"
+        assert q["options"] == ["안산지원", "본원"]
+        # 사람이 답한다 → 무상태 재개 → done.
+        ws.send_json({"type": "human_answer", "text": "안산지원"})
+        done = ws.receive_json()
+        assert done["type"] == "backend_echo"
+        assert done["text"].startswith("완료:") and "안산지원" in done["text"]
+
+
+# ---- T8b: 질문 닫기(dismiss) → 늦은 답 무시 → 새 작업 정상 시작 ---------------
+def test_dismiss_question(monkeypatch):
+    steps = [
+        ("perceive", {}),
+        ("ask_human", {"question": "법원?", "options": None}),
+        ("done", {"result": "재시작 완료"}),  # 닫은 뒤 새 user_input으로 시작되는 런이 도달
+    ]
+    monkeypatch.setattr(main, "MODEL", model_from(lambda i: steps[i]))
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "user_input", "text": "t1"})
+        assert ws.receive_json()["type"] == "command"  # perceive
+        ws.send_json({"type": "observation", "observation": ok_obs()})
+        assert ws.receive_json()["type"] == "ask_human"
+        # 질문을 닫는다 → 대기 상태가 비워져, 뒤늦은 답은 무시되고(재개 안 됨)
+        ws.send_json({"type": "dismiss_question"})
+        ws.send_json({"type": "human_answer", "text": "무시될 답"})
+        # 새 요청은 깨끗이 시작된다
+        ws.send_json({"type": "user_input", "text": "t2"})
+        result = drive(ws)
+    assert result.startswith("완료:") and "재시작 완료" in result
+
+
+# ---- T9: resume()는 steps 보존 + wall-clock 리셋 ------------------------------
+def test_resume_preserves_steps_resets_clock():
+    s = Session(ws=None)
+    s.reset()
+    s.steps = 5
+    s.last_tool_sig = "click:5"
+    s.started_at = time.monotonic() - 1000.0  # 사람이 오래 기다린 척
+    s.resume()
+    assert s.steps == 5  # 전체 작업량 제한은 유지(보존)
+    assert time.monotonic() - s.started_at < 1.0  # 타임아웃 시계만 새로 시작
+    assert s.last_tool_sig is None  # 답 직후 같은 동작이 와도 무진전 가드에 안 걸리게 비움
 
 
 # ---- T7: 펜스(프롬프트 인젝션 격리) -------------------------------------------

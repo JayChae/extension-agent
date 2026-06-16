@@ -7,7 +7,7 @@ WS 왕복을 직접 수행하고, 반환한 관측 문자열이 모델이 보는
 import os
 from pathlib import Path
 
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, CallDeferred, DeferredToolRequests, RunContext
 from pydantic_ai.models.anthropic import AnthropicModelSettings
 from pydantic_ai.output import ToolOutput
 
@@ -34,6 +34,8 @@ SYSTEM_PROMPT = """\
 - navigate 직후엔 페이지가 새로 로드되어 이전 인덱스가 무효가 되므로, 반드시 perceive를 다시 호출해
   새 인덱스를 받는다.
 - 같은 동작을 무의미하게 반복하지 마라(헛돎).
+- 확신이 안 서거나 분기 판단(예: 결과 0건/여러 건, 지원 vs 본원)이 필요하면 추측하지 말고
+  ask_human으로 사수에게 물어라.
 
 [사건검색 도메인 힌트]
 - '사건구분'은 native <select>가 아니라 autocomplete 입력이다 → type으로 값을 넣은 뒤 뜨는 후보를 click.
@@ -90,9 +92,19 @@ agent = Agent(
     deps_type=Session,
     instructions=SYSTEM_PROMPT,
     model_settings=MODEL_SETTINGS,
-    output_type=[ToolOutput(done, name="done")],
+    output_type=[ToolOutput(done, name="done"), DeferredToolRequests],
     retries=1,
 )
+
+
+@agent.tool_plain
+def ask_human(question: str, options: list[str] | None = None) -> str:
+    """모르거나 막혔을 때 사수(사람)에게 묻고 답을 기다린다. 답이 이 호출의 결과가 된다.
+
+    CallDeferred로 런이 DeferredToolRequests로 깔끔히 종료되고, 백엔드가 사람 답을
+    deferred_tool_results로 다시 먹여 그 자리에서 재개한다(§6).
+    """
+    raise CallDeferred()
 
 
 @agent.tool
