@@ -22,3 +22,11 @@ line-length = 100
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+# 테스트끼리 헬퍼를 공유한다(예: test_safety가 test_loop의 drive/ok_obs를 import).
+# pytest는 tests/를 자동으로 경로에 넣지만 정적 타입체커는 모르므로 명시해 준다(런타임 영향 없음).
+[tool.ty.environment]
+extra-paths = ["tests"]
+
+[tool.pyright]
+extraPaths = ["tests"]

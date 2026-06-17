@@ -64,6 +64,9 @@ function connect() {
     } else if (msg.type === "ask_human") {
       // 에이전트가 막혀서 사수(사람)에게 묻는다 → 질문 카드를 띄우고 답을 기다린다(§6).
       renderAskCard(msg.question, msg.options);
+    } else if (msg.type === "approve_action") {
+      // 🔒 비가역 액션(제출 등) — 성숙도 무관 강제 승인 카드를 띄운다(§4·§11).
+      renderApprovalCard(msg.label, msg.index);
     } else if (msg.type === "propose_sop") {
       // 메모리 에이전트가 시연을 SOP 초안으로 증류했다 → 검토·승인 카드를 띄운다(§7).
       renderSopCard(msg.path, msg.diff, msg.open_branches);
@@ -175,6 +178,44 @@ function renderAskCard(question, options) {
   log.appendChild(card);
   log.scrollTop = log.scrollHeight;
   ansInput.focus();
+}
+
+// 🔒 비가역 액션 승인 카드(§4·§11). 제출 등 크리티컬 클릭은 성숙도와 무관하게 항상 여기를 거친다.
+// 승인/거부 둘 다 action_approval로 백엔드에 보내 무상태 재개시킨다. 답 전까지 메인 입력 잠금.
+function renderApprovalCard(label, index) {
+  const card = document.createElement("div");
+  card.className = "card";
+
+  const q = document.createElement("div");
+  q.className = "q";
+  q.textContent = `⚠️ 비가역 액션입니다 — 실행할까요?\n[${index}] ${label || "(라벨 없음)"}`;
+  card.appendChild(q);
+
+  function decide(approved) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "action_approval", approved }));
+    addLine("user", approved ? "승인함" : "거부함");
+    card.remove();
+    input.disabled = false;
+  }
+
+  const opts = document.createElement("div");
+  opts.className = "opts";
+  const yes = document.createElement("button");
+  yes.type = "button";
+  yes.textContent = "승인 (실행)";
+  yes.addEventListener("click", () => decide(true));
+  const no = document.createElement("button");
+  no.type = "button";
+  no.textContent = "거부";
+  no.addEventListener("click", () => decide(false));
+  opts.appendChild(yes);
+  opts.appendChild(no);
+  card.appendChild(opts);
+
+  input.disabled = true; // 결정 전엔 메인 입력 잠금
+  log.appendChild(card);
+  log.scrollTop = log.scrollHeight;
 }
 
 form.addEventListener("submit", (e) => {

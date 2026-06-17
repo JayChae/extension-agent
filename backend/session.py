@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 
 from fastapi import WebSocket
 
+import audit
+
 # 가드레일 상수 (§6)
 HAPPY_PATH_STEPS = 8
 DEFAULT_STEP_BUDGET = HAPPY_PATH_STEPS * 3  # 행복경로 × 3 = 24
@@ -20,6 +22,9 @@ NO_PROGRESS_WINDOW = 6  # 최근 관측 해시를 몇 개까지 보나
 NO_PROGRESS_REPEAT = 3  # 같은 화면 해시가 윈도우 안에서 이만큼 반복되면 무진전
 MAX_CONSEC_FAILS = 3  # 연속 실패 K회
 WALL_CLOCK_TIMEOUT = 180.0  # 초, 전역
+# 레이트 리미터(§11): 윈도우 내 최대 행동 수 — 정상 대화형 페이스보다 넉넉한 폭주 백스톱
+RATE_MAX = 30
+RATE_WINDOW = 10.0  # 초
 
 
 class RunHalted(Exception):
@@ -32,6 +37,11 @@ class RunHalted(Exception):
 
 class Stopped(RunHalted):
     """사용자 STOP 전용 — 이미 클라이언트에 통지됐으므로 추가 보고 안 함."""
+
+
+class CaptchaHandoff(RunHalted):
+    """CAPTCHA/안티봇 감지 — 풀거나 우회하지 않고 사람에게 핸드오프(§4).
+    외부 차단이라 SOP 성숙도에는 집계하지 않는다(main.py에서 별도 처리)."""
 
 
 def _tool_sig(action: dict) -> str | None:
@@ -72,9 +82,11 @@ class Session:
     started_at: float = 0.0
     budget: int = DEFAULT_STEP_BUDGET
     recent_hashes: deque = field(default_factory=lambda: deque(maxlen=NO_PROGRESS_WINDOW))
+    act_times: deque = field(default_factory=deque)  # 레이트 리미터용 행동 타임스탬프
     last_tool_sig: str | None = None
-    pending_messages: list | None = None  # ask_human 대기 중 보관하는 message_history(§6)
+    pending_messages: list | None = None  # ask_human/승인 대기 중 보관하는 message_history(§6)
     pending_call_id: str | None = None  # 재개 시 답을 매칭할 ask_human tool_call_id
+    pending_approval_id: str | None = None  # 크리티컬 승인 대기 중인 tool_call_id(§4·§11)
     pending_sop: dict | None = None  # 승인 대기 중인 SOP 제안 {site, name, draft}(§7 학습)
     active_sop_path: str | None = None  # 이번 런이 라우팅된 SOP(레슨을 붙일 대상)(§7 경로②)
     last_question: str | None = None  # 직전 ask_human 질문(답과 짝지어 레슨 후보로)
@@ -91,6 +103,7 @@ class Session:
         self.budget = DEFAULT_STEP_BUDGET  # 런 시작마다 현재 상수에서 다시 읽음(테스트·향후 task별 조정 가능)
         self.started_at = time.monotonic()
         self.recent_hashes.clear()
+        self.act_times.clear()
         self.last_tool_sig = None
         self.pending_sop = None
         self.active_sop_path = None
@@ -104,9 +117,10 @@ class Session:
             self.obs_q.get_nowait()
 
     def clear_pending(self) -> None:
-        """ask_human 대기 상태를 비운다. 두 필드는 항상 함께 세팅·해제된다(재개·닫기·STOP·reset 공통)."""
+        """ask_human/승인 대기 상태를 비운다. 세 필드는 함께 해제된다(재개·닫기·STOP·reset 공통)."""
         self.pending_messages = None
         self.pending_call_id = None
+        self.pending_approval_id = None
 
     def resume(self) -> None:
         """ask_human 답을 받아 재개하기 직전. wall-clock만 다시 잡고(사람이 생각한 시간은
@@ -121,14 +135,24 @@ class Session:
             raise Stopped("STOP")
         if self.steps >= self.budget:
             raise RunHalted("스텝 예산 초과")
-        if time.monotonic() - self.started_at > WALL_CLOCK_TIMEOUT:
+        now = time.monotonic()
+        if now - self.started_at > WALL_CLOCK_TIMEOUT:
             raise RunHalted("전역 타임아웃")
+        # 레이트 리미터(§11) — 윈도우 밖 타임스탬프를 버리고 윈도우 내 행동 수를 제한(폭주 시 사이트 보호).
+        while self.act_times and now - self.act_times[0] > RATE_WINDOW:
+            self.act_times.popleft()
+        if len(self.act_times) >= RATE_MAX:
+            raise RunHalted("레이트 리밋 초과")
+        self.act_times.append(now)
         sig = _tool_sig(action)
         if sig is not None and sig == self.last_tool_sig:
             raise RunHalted("무진전: 같은 동작 반복")
         self.last_tool_sig = sig
 
     def _guard_after(self, obs: dict) -> None:
+        # CAPTCHA/안티봇 감지(§4) — 풀거나 우회하지 않고 사람에게 핸드오프. ok 여부보다 먼저 본다.
+        if obs.get("captcha"):
+            raise CaptchaHandoff("CAPTCHA 감지 — 자동 진행을 멈춥니다. 사람이 직접 처리해 주세요")
         if not obs.get("ok"):
             self.fails += 1
             if self.fails >= MAX_CONSEC_FAILS:
@@ -143,9 +167,19 @@ class Session:
     async def act(self, action: dict) -> dict:
         """command 전송 → 매칭 observation 1개 수신(1 command ⇒ 1 observation 계약)."""
         self._guard_before(action)
+        # 감사 로그(§11): 제안 액션 — 비밀값은 흘러오지 않으나 본문 대신 식별자만 남긴다.
+        audit.log("action", kind=action.get("kind"), index=action.get("index"), url=action.get("url"))
         await self.ws.send_json({"type": "command", "action": action})
         obs = await self.obs_q.get()
         self.steps += 1
+        page = obs.get("page") or {}
+        audit.log(
+            "observation",
+            ok=obs.get("ok"),
+            url=page.get("url"),
+            title=page.get("title"),
+            n_elements=len(obs.get("elements") or []),
+        )
         self._guard_after(obs)
         # 최종 화면 = 마지막 관측(성공/실패 무관). 마지막 액션이 실패로 끝나면 verify가 그 실패 화면을
         # 봐야 한다 — 옛 성공 화면을 보면 실패한 런을 성공으로 졸업시킨다(§14-3 조용한 실패 방지)(§10).
