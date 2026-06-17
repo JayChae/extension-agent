@@ -7,10 +7,12 @@
 """
 
 import time
+from typing import cast
 
 import main
 import session as session_mod
 from agent import render_observation
+from fastapi import WebSocket
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
@@ -206,7 +208,7 @@ def test_dismiss_question(monkeypatch):
 
 # ---- T9: resume()는 steps 보존 + wall-clock 리셋 ------------------------------
 def test_resume_preserves_steps_resets_clock():
-    s = Session(ws=None)
+    s = Session(ws=cast(WebSocket, None))  # 이 테스트는 resume() 로직만 검증 — ws를 안 쓴다
     s.reset()
     s.steps = 5
     s.last_tool_sig = "click:5"

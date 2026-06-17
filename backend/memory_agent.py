@@ -61,7 +61,7 @@ class SopDraft(BaseModel):
     )
 
 
-memory_agent = Agent(output_type=SopDraft, instructions=MEMORY_PROMPT)
+memory_agent = Agent[None, SopDraft](output_type=SopDraft, instructions=MEMORY_PROMPT)
 
 
 def _render_trace(events: list[dict]) -> str:
@@ -137,7 +137,7 @@ class LessonProposal(BaseModel):
     ops: list[LessonOp] = Field(default_factory=list)
 
 
-lesson_agent = Agent(output_type=LessonProposal, instructions=LESSON_PROMPT)
+lesson_agent = Agent[None, LessonProposal](output_type=LessonProposal, instructions=LESSON_PROMPT)
 
 
 def _render_qa(sop_goal: str, existing_lessons: list[str], qa_pairs: list[dict]) -> str:
@@ -191,7 +191,7 @@ class VerifyVerdict(BaseModel):
     evidence: str = Field(description="판정 근거 한 줄(화면에서 인용)")
 
 
-verify_agent = Agent(output_type=VerifyVerdict, instructions=VERIFY_PROMPT)
+verify_agent = Agent[None, VerifyVerdict](output_type=VerifyVerdict, instructions=VERIFY_PROMPT)
 
 
 def _render_verify_input(

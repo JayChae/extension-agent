@@ -244,8 +244,9 @@ async def ws(websocket: WebSocket):
 
             elif mtype == "human_answer":
                 # ask_human 답을 받아 무상태로 재개한다(§6). 대기 중이 아니면 무시.
-                if not session.pending_messages:
+                if not session.pending_messages or session.pending_call_id is None:
                     continue
+                call_id = session.pending_call_id
                 answer = msg.get("text", "")
                 audit.log("ask_human", question=session.last_question, answer=answer)
                 # SOP 따라 일하다 막혀 물은 거라면, 질문+답을 런 종료 시 레슨으로 증류할 후보로 적재(§7).
@@ -255,7 +256,7 @@ async def ws(websocket: WebSocket):
                     )
                 session.last_question = None
                 results = DeferredToolResults()
-                results.calls[session.pending_call_id] = answer
+                results.calls[call_id] = answer
                 history = session.pending_messages
                 session.clear_pending()
                 session.resume()
@@ -267,10 +268,11 @@ async def ws(websocket: WebSocket):
                 # 🔒 크리티컬 액션 승인/거부를 받아 무상태로 재개한다(§4·§11). 대기 중이 아니면 무시.
                 if not session.pending_messages or not session.pending_approval_id:
                     continue
+                approval_id = session.pending_approval_id
                 approved = bool(msg.get("approved"))
                 audit.log("approval", approved=approved)
                 results = DeferredToolResults()
-                results.approvals[session.pending_approval_id] = approved
+                results.approvals[approval_id] = approved
                 history = session.pending_messages
                 session.clear_pending()
                 session.resume()

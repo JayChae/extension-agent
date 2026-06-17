@@ -30,7 +30,7 @@ CRITICAL_KEYWORDS = (
 )
 
 
-def label_for_index(obs: dict | None, index: int) -> str:
+def label_for_index(obs: dict | None, index: int | None) -> str:
     """관측 elements에서 `[index]` 줄의 설명(태그+속성+라벨)을 꺼낸다. 없으면 빈 문자열.
 
     줄 형식(content.js): `*[12]<button name="사건검색"> 사건검색` — *는 새 요소 표시.
