@@ -48,6 +48,9 @@ function connect() {
     } else if (msg.type === "propose_sop") {
       // 메모리 에이전트가 시연을 SOP 초안으로 증류했다 → 검토·승인 카드를 띄운다(§7).
       renderSopCard(msg.path, msg.diff, msg.open_branches);
+    } else if (msg.type === "propose_lesson") {
+      // 막혀서 물은 걸 레슨으로 증류했다 → 화해(ADD/EDIT/STRENGTHEN) 승인 카드를 띄운다(§7 경로②).
+      renderLessonCard(msg.path, msg.diff);
     } else if (msg.type === "stopped") {
       addLine("sys", "백엔드: 정지됨");
     }
@@ -319,6 +322,15 @@ function resetTeaching() {
   }
 }
 
+// 승인 카드의 diff 표시용 <pre>(SOP 카드·레슨 카드 공용 — 스타일 중복 제거).
+function makeDiffPre(diff) {
+  const pre = document.createElement("pre");
+  pre.textContent = diff || "";
+  pre.style.cssText =
+    "max-height:220px;overflow:auto;background:#fff;border:1px solid #e0c060;border-radius:4px;padding:6px;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0;";
+  return pre;
+}
+
 // 증류된 SOP 초안을 검토·승인하는 카드(§7). 승인 = "배웠다" 순간 + 인젝션 잠금.
 function renderSopCard(path, diff, openBranches) {
   const card = document.createElement("div");
@@ -329,11 +341,7 @@ function renderSopCard(path, diff, openBranches) {
   q.textContent = "📝 새 절차를 배웠어요 — 검토하고 승인하세요\n" + (path || "");
   card.appendChild(q);
 
-  const pre = document.createElement("pre");
-  pre.textContent = diff || "";
-  pre.style.cssText =
-    "max-height:220px;overflow:auto;background:#fff;border:1px solid #e0c060;border-radius:4px;padding:6px;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0;";
-  card.appendChild(pre);
+  card.appendChild(makeDiffPre(diff));
 
   // 미해결 분기 — 원하면 지금 설명 추가(승인 시 레슨으로 첨부).
   const branchInputs = [];
@@ -373,6 +381,43 @@ function renderSopCard(path, diff, openBranches) {
   reject.addEventListener("click", () => {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "reject_sop" }));
     addLine("sys", "절차를 저장하지 않았어요.");
+    card.remove();
+  });
+  opts.appendChild(approve);
+  opts.appendChild(reject);
+  card.appendChild(opts);
+
+  log.appendChild(card);
+  log.scrollTop = log.scrollHeight;
+}
+
+// 막혀서 물은 걸 증류한 레슨 변경(ADD/EDIT/STRENGTHEN)을 검토·승인하는 카드(§7 경로②).
+function renderLessonCard(path, diff) {
+  const card = document.createElement("div");
+  card.className = "card";
+
+  const q = document.createElement("div");
+  q.className = "q";
+  q.textContent = "💡 이번에 알려준 걸 레슨으로 남길까요?\n" + (path || "");
+  card.appendChild(q);
+
+  card.appendChild(makeDiffPre(diff));
+
+  const opts = document.createElement("div");
+  opts.className = "opts";
+  const approve = document.createElement("button");
+  approve.type = "button";
+  approve.textContent = "승인 (반영)";
+  approve.addEventListener("click", () => {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "approve_lesson" }));
+    card.remove();
+  });
+  const reject = document.createElement("button");
+  reject.type = "button";
+  reject.textContent = "반려";
+  reject.addEventListener("click", () => {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "reject_lesson" }));
+    addLine("sys", "레슨을 남기지 않았어요.");
     card.remove();
   });
   opts.appendChild(approve);
