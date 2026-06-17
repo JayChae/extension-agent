@@ -53,6 +53,34 @@
       #teach.recording {
         background: #b9770e;
       }
+      #dashboard {
+        padding: 8px 10px;
+        border-bottom: 1px solid #ddd;
+        background: #f3f7f4;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      #dashboard .skill {
+        font-weight: 600;
+      }
+      #dashboard .level {
+        border-radius: 10px;
+        padding: 1px 8px;
+        background: #c8e6c9;
+        color: #1b5e20;
+      }
+      #dashboard .level.ASSISTED {
+        background: #1b5e20;
+        color: #fff;
+      }
+      #dashboard .dots {
+        letter-spacing: 1px;
+        color: #999;
+        font-family: ui-monospace, monospace;
+      }
       #log {
         flex: 1;
         overflow-y: auto;
@@ -147,6 +175,11 @@
         <button id="stop" type="button">STOP</button>
       </div>
     </header>
+    <div id="dashboard" hidden>
+      <span class="skill"></span>
+      <span class="level"></span>
+      <span class="dots"></span>
+    </div>
     <div id="log"></div>
     <form id="form">
       <input id="text" type="text" placeholder="메시지를 입력하세요" autocomplete="off" />

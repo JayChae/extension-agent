@@ -11,8 +11,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic_ai import DeferredToolRequests, DeferredToolResults
 
 import memory_store
-from agent import MODEL, agent
-from memory_agent import distill, distill_lesson
+from agent import MODEL, agent, render_observation
+from memory_agent import distill, distill_lesson, verify_run
 from session import RunHalted, Session, Stopped
 
 app = FastAPI()
@@ -63,11 +63,13 @@ async def run_task(
             f"[cache] read={getattr(usage, 'cache_read_tokens', None)} "
             f"write={getattr(usage, 'cache_write_tokens', None)}"
         )
+        await maybe_verify_and_promote(session)  # done → 화면 증거로 성공 판정 → 졸업 집계(§10)
         await maybe_propose_lesson(session)  # 런 종료 → 이번에 물어본 것을 레슨으로(§7 경로②)
     except Stopped:
         pass  # STOP은 이미 클라이언트에 통지됨
     except RunHalted as e:
         await session.ws.send_json({"type": "backend_echo", "text": f"중단(가드레일): {e.reason}"})
+        await maybe_verify_and_promote(session, success=False)  # 가드레일 중단 = 실패로 집계(§10)
         await maybe_propose_lesson(session)  # 막혀서 끝났어도 사람 답은 배울 가치가 있다
     except asyncio.CancelledError:
         raise  # STOP 취소 경로
@@ -148,6 +150,55 @@ async def maybe_propose_lesson(session: Session) -> None:
     )
 
 
+def _verify_passed(verify: dict, verdict) -> bool:
+    """심판 판정을 졸업용 성공/실패로 환원하는 결정적 규칙(§9·§10).
+
+    채워진 기준 종류가 ≥2이고 그 종류가 *전부* 통과해야 성공. 약한 verify(채워진 종류 <2)나
+    한 종류라도 실패면 졸업 금지(§14-3 조용한 실패 방지). artifact는 MVP 미평가 → 채워졌으면 실패."""
+    if verify.get("artifact"):
+        return False  # 산출물 판정은 후순위 — 채워진 SOP는 졸업 보류
+    filled = [k for k in ("must_appear", "must_match", "must_not") if verify.get(k)]
+    if len(filled) < 2:
+        return False
+    return all(getattr(verdict, k) for k in filled)
+
+
+async def maybe_verify_and_promote(session: Session, success: bool | None = None) -> None:
+    """런 종료 시 SOP의 verify 기준을 최종 화면과 대조해 성공/실패를 졸업 카운터에 누적한다(§10).
+
+    success=None이면 별도 심판 에이전트가 화면 증거로 판정(자기선언 금지). success=False면
+    가드레일 중단 등 명백한 실패로 화면 판정 없이 집계. 라우팅된 SOP가 없으면 졸업 대상이 아니다."""
+    sop_path = session.active_sop_path
+    if not sop_path:
+        return
+    if success is None:
+        verify = await asyncio.to_thread(memory_store.read_verify, sop_path)
+        obs = session.last_observation
+        if not verify or obs is None:
+            return  # 기준/화면 없으면 약한 판정으로 졸업시키지 않고 집계 보류(§14-3)
+        try:
+            goal = await asyncio.to_thread(memory_store.goal_for, sop_path)
+            verdict = await verify_run(goal, verify, session.task_text, render_observation(obs))
+        except asyncio.CancelledError:
+            raise  # STOP 취소
+        except Exception as e:  # 심판 모델/네트워크 예외 — 보고만, 집계 보류(런 결과 보존)
+            await session.ws.send_json({"type": "backend_echo", "text": f"성공 판정 실패: {e}"})
+            return
+        success = _verify_passed(verify, verdict)
+    res = await asyncio.to_thread(memory_store.record_outcome, sop_path, success)
+    await session.ws.send_json(
+        {
+            "type": "maturity_update",
+            "path": sop_path,
+            "level": res["level"],
+            "success_window": res["success_window"],
+            "success": success,
+            "promoted": res["promoted"],
+            "demoted": res["demoted"],
+        }
+    )
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
     await websocket.accept()
@@ -162,6 +213,7 @@ async def ws(websocket: WebSocket):
                     continue
                 session.reset()
                 text = msg.get("text", "")
+                session.task_text = text  # 힌트 붙이기 전 원본 — verify 입력값 대조용(§10)
                 # 배운 SOP가 있으면 결정적 라우팅으로 read_sop 힌트를 앞에 붙인다(§9). 모델이 최종 판단.
                 sop_path = memory_store.route(text)
                 if sop_path:

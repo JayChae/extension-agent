@@ -80,6 +80,8 @@ class Session:
     last_question: str | None = None  # 직전 ask_human 질문(답과 짝지어 레슨 후보로)
     lesson_candidates: list = field(default_factory=list)  # [{question, answer}, ...] 런 종료 시 증류
     pending_lesson: dict | None = None  # 승인 대기 중인 레슨 제안 {sop_path, ops}(§7 화해)
+    task_text: str | None = None  # 이번 런의 원본 요청(verify 입력값 대조용)(§10 Phase 8)
+    last_observation: dict | None = None  # 마지막 성공 관측 = 최종 화면(verify 판정 대상)(§10)
 
     def reset(self) -> None:
         """새 작업 시작 직전 카운터 초기화 + 잔여 관측 비우기."""
@@ -95,6 +97,8 @@ class Session:
         self.last_question = None
         self.lesson_candidates = []
         self.pending_lesson = None
+        self.task_text = None
+        self.last_observation = None
         self.clear_pending()
         while not self.obs_q.empty():
             self.obs_q.get_nowait()
@@ -143,4 +147,7 @@ class Session:
         obs = await self.obs_q.get()
         self.steps += 1
         self._guard_after(obs)
+        # 최종 화면 = 마지막 관측(성공/실패 무관). 마지막 액션이 실패로 끝나면 verify가 그 실패 화면을
+        # 봐야 한다 — 옛 성공 화면을 보면 실패한 런을 성공으로 졸업시킨다(§14-3 조용한 실패 방지)(§10).
+        self.last_observation = obs
         return obs
