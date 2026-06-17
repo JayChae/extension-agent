@@ -5,6 +5,7 @@ const input = document.getElementById("text");
 const stopBtn = document.getElementById("stop");
 const teachBtn = document.getElementById("teach");
 const statusEl = document.getElementById("status");
+const dashboardEl = document.getElementById("dashboard");
 
 const BACKEND_WS = "ws://127.0.0.1:8000/ws";
 let ws = null;
@@ -18,6 +19,24 @@ function addLine(cls, text) {
   div.textContent = text;
   log.appendChild(div);
   log.scrollTop = log.scrollHeight;
+}
+
+// 졸업 대시보드 — SOP 스킬명·성숙도 레벨·최근 성공 추세(O/X 점)를 표시(§10).
+// 승급은 자동이라 버튼 없음(표시 전용). promoted면 로그에 축하 한 줄.
+function updateDashboard(msg) {
+  const name = (msg.path || "").split("/").pop().replace(/\.md$/, "");
+  const dots = (msg.success_window || []).map((ok) => (ok ? "●" : "○")).join(" ");
+  dashboardEl.querySelector(".skill").textContent = name;
+  const levelEl = dashboardEl.querySelector(".level");
+  levelEl.textContent = msg.level;
+  levelEl.className = "level " + msg.level;
+  dashboardEl.querySelector(".dots").textContent = dots;
+  dashboardEl.hidden = false;
+  if (msg.promoted) {
+    addLine("sys", `🎉 승급: ${msg.level} — 이 업무를 점점 잘하게 됐어요`);
+  } else if (msg.demoted) {
+    addLine("sys", `⚠️ 강등: ${msg.level} — 최근 실패가 늘어 다시 확인이 필요해요`);
+  }
 }
 
 function connect() {
@@ -51,6 +70,9 @@ function connect() {
     } else if (msg.type === "propose_lesson") {
       // 막혀서 물은 걸 레슨으로 증류했다 → 화해(ADD/EDIT/STRENGTHEN) 승인 카드를 띄운다(§7 경로②).
       renderLessonCard(msg.path, msg.diff);
+    } else if (msg.type === "maturity_update") {
+      // 런이 끝나 졸업 카운터가 갱신됐다 → 대시보드에 레벨·성공 추세를 표시(§10).
+      updateDashboard(msg);
     } else if (msg.type === "stopped") {
       addLine("sys", "백엔드: 정지됨");
     }

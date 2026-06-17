@@ -24,6 +24,11 @@ _LESSON_HEADER = "## 레슨"
 _LESSON_PREFIX = "- ⚠️ "
 _WEIGHT_RE = re.compile(r"^\(×(\d+)\)\s*(.*)$")
 
+# Phase 8: 졸업 상수 (§10). MVP는 LEARNING↔ASSISTED 한 단계만.
+MATURITY_WINDOW = 10  # 최근 N번 성공/실패만 본다
+PROMOTE_THRESHOLD = 0.9  # 검증된 성공률 임계 T
+PROMOTE_MIN = 10  # 꽉 찬 창에서만 승급 판정(§10 "최근 N=10")
+
 
 def _index_path() -> Path:
     return MEMORY_DIR / INDEX_NAME
@@ -42,6 +47,11 @@ def load_index() -> dict:
     return data
 
 
+def _dump_frontmatter(fm: dict) -> str:
+    """프론트매터 dict → YAML 문자열. render_sop·record_outcome가 공유 — 직렬화 포맷 드리프트 방지."""
+    return yaml.safe_dump(fm, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+
 def render_sop(draft: SopDraft, branch_notes: list[str] | None = None) -> str:
     """SopDraft → 마크다운(YAML 프론트매터 + 자연어 본문). maturity는 harness가 LEARNING으로 찍는다(§7)."""
     frontmatter = {
@@ -50,7 +60,7 @@ def render_sop(draft: SopDraft, branch_notes: list[str] | None = None) -> str:
         "verify": draft.verify.model_dump(),  # 모델 필드를 손으로 다시 적지 않음(드리프트 방지)
         "maturity": {"level": "LEARNING", "success_window": [], "autonomous_success_count": 0},
     }
-    fm = yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    fm = _dump_frontmatter(frontmatter)
 
     body = [f"# {draft.goal}", "", "## 순서"]
     body += [f"{i}. {step}" for i, step in enumerate(draft.steps, 1)]
@@ -265,3 +275,71 @@ def render_lesson_diff(sop_path: str, ops: list[LessonOp]) -> str:
         elif op.op == "STRENGTHEN":
             lines.append(f'↑ 강화: "{op.target}" (중요도 +1)')
     return "\n".join(lines)
+
+
+# ── Phase 8: 증거 기반 졸업 — verify 기준 읽기 + maturity 갱신(프론트매터만) (§10) ──────
+
+_LEVEL_RANK = {"LEARNING": 0, "ASSISTED": 1}  # MVP 범위 — 상위 레벨은 후순위
+
+
+def _split_frontmatter(text: str) -> tuple[dict, str]:
+    """SOP를 (프론트매터 dict, 본문 문자열)로 가른다. 본문은 글자 그대로 보존(재작성 시 유실 금지).
+
+    render_sop 출력 형식(첫 `---`…`---` 사이가 YAML)을 따른다. 형식이 아니면 ({}, 원문)."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return {}, text
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            fm = yaml.safe_load("\n".join(lines[1:i])) or {}
+            body = "\n".join(lines[i + 1 :])  # 닫는 --- 뒤 전부(앞 빈 줄 포함 → 재조립이 정확)
+            return fm, body
+    return {}, text
+
+
+def read_verify(sop_path: str) -> dict:
+    """SOP 프론트매터의 verify 기준 dict(심판 입력용). 파일/필드 없으면 {}."""
+    f = _sop_file(sop_path)
+    if not f.is_file():
+        return {}
+    fm, _body = _split_frontmatter(f.read_text(encoding="utf-8"))
+    return fm.get("verify") or {}
+
+
+def _level_for(window: list) -> str:
+    """성공 창만으로 레벨을 결정(승급·강등 대칭). 꽉 차기 전엔 LEARNING."""
+    if len(window) < PROMOTE_MIN:
+        return "LEARNING"
+    rate = sum(1 for x in window if x) / len(window)
+    return "ASSISTED" if rate >= PROMOTE_THRESHOLD else "LEARNING"
+
+
+def record_outcome(sop_path: str, success: bool) -> dict:
+    """검증된 성공/실패 1건을 maturity.success_window에 누적하고 레벨을 재계산해 SOP에 기록한다.
+
+    프론트매터의 maturity 블록만 실질 변경하고 본문(순서·레슨·사람 tail)은 글자 그대로 보존.
+    SOP 파일만 단일 git commit(인덱스 안 건드림 — apply_lessons와 동일). 반환: 새 레벨·창·승강급 플래그."""
+    f = _sop_file(sop_path)
+    fm, body = _split_frontmatter(f.read_text(encoding="utf-8"))
+    maturity = fm.get("maturity") or {}
+    prev_level = maturity.get("level", "LEARNING")
+    window = list(maturity.get("success_window") or [])
+    window.append(bool(success))
+    window = window[-MATURITY_WINDOW:]
+    level = _level_for(window)
+    maturity["level"] = level
+    maturity["success_window"] = window
+    maturity.setdefault("autonomous_success_count", 0)
+    fm["maturity"] = maturity
+
+    f.write_text(f"---\n{_dump_frontmatter(fm)}---\n{body}", encoding="utf-8")
+
+    name = Path(sop_path).stem
+    _git_commit([f], f"[졸업] maturity: {name} → {level}")
+    return {
+        "file": f"sop/{sop_path}",
+        "level": level,
+        "success_window": window,
+        "promoted": _LEVEL_RANK.get(level, 0) > _LEVEL_RANK.get(prev_level, 0),
+        "demoted": _LEVEL_RANK.get(level, 0) < _LEVEL_RANK.get(prev_level, 0),
+    }

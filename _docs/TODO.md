@@ -13,9 +13,9 @@
 ---
 
 ## 📍 현재 위치
-> **Phase 7 구현·자동검증 완료 — 실제 scourt 시연·라이브 Opus 레슨 증류·커밋은 사용자 검토 대기. 다음은 Phase 8.** "교정으로 배운다"가 붙었다(범위=막힘 경로 중심, 사용자 확정): SOP로 라우팅된 런(`session.active_sop_path`)에서 에이전트가 막혀 `ask_human`을 부르면, 사람의 답(=교정 포함)을 `session.lesson_candidates`에 적재 → 런이 done/halt로 끝나면 `maybe_propose_lesson()`이 **레슨 전담 에이전트**(`memory_agent.py`의 `lesson_agent`, Opus)로 기존 레슨+Q&A를 `LessonProposal(ops[])`로 증류 → `propose_lesson` 카드 → 사람 원클릭 승인 → harness(`memory_store.apply_lessons`)가 SOP의 `## 레슨` 섹션에 **화해(ADD/EDIT/STRENGTHEN)** 병합 후 SOP 파일만 단일 git commit(모델은 파일 안 씀, §9). 다음 런에서 `read_sop`가 그 레슨을 로드 → 안 물음. 가짜 모델+임시 git repo로 자동테스트(21개 전체 통과, `backend/tests/test_lessons.py` 5개 포함).
+> **Phase 8 구현·자동검증 완료 — 실제 scourt 풀루프·라이브 Opus 심판은 사용자 검토 대기. 다음은 🔒 횡단 안전 최소선.** "점점 나아진다"(증거 기반 졸업)가 붙었다: SOP로 라우팅된 런이 끝나면 `maybe_verify_and_promote()`가 ① done이면 **별도 심판 에이전트**(`memory_agent.py`의 `verify_agent`, Opus)에게 최종 화면(`session.last_observation`)+입력값(`session.task_text`)+`verify` 기준을 줘 기준별 통과/실패를 받고(자기선언 금지), harness `_verify_passed`가 "4종 중 ≥2종 채워짐 & 전부 통과 → 성공" 결정적 규칙으로 환원 ② 가드레일 halt면 화면 판정 없이 실패로 집계 → `memory_store.record_outcome`가 SOP 프론트매터 `maturity.success_window`(최근 N=10)에 누적·레벨 재계산(성공률 ≥0.9 → `LEARNING↔ASSISTED`, 승급/강등 대칭) 후 SOP 파일만 단일 git commit(자동 — 결정적 증거 카운터라 사람 승인 불필요, §10) → `maturity_update` 메시지로 사이드패널 대시보드에 레벨·성공 추세(●/○) 표시, 승급/강등 시 로그 한 줄. 가짜 모델+임시 git repo로 자동테스트(27개 전체 통과, `backend/tests/test_maturity.py` 6개 포함).
 >
-> ⚠️ **Phase 7 구현 메모:** ① **범위 = 막힘 경로 중심**(사용자 확정) — §7 경로②·③을 `ask_human` 한 경로로 합침(사람 답이 단순 정보든 교정이든 동일하게 레슨 후보). SOP 초안 "반려+이유→재증류"(경로③ 일부)는 넣지 않음. ② **레슨 전담 에이전트는 `memory_agent.py`에 추가**(`lesson_agent`, `distill_lesson()`) — 수행 에이전트와 분리 유지, 모델은 제안만(`LessonProposal`), harness가 승인 후 기록(§9 인젝션 방어). ③ **증류는 런 종료 시점**(재개 사이클 전체 Q&A를 한 번에 → 카드 하나), `run_task` 끝에서 인라인 await(STOP 취소 경로 유지). ④ **화해**: ADD=추가, EDIT=모순 줄 교체(=반복 모순 은퇴, recency 우선), STRENGTHEN=중요도 +1 → 레슨 줄에 `(×N)` 표기. EDIT/STRENGTHEN 대상은 `target`에 기존 레슨 본문 정확 일치(못 찾으면 ADD 폴백). ⑤ `apply_lessons`는 `## 레슨` 섹션만 재작성 — 프론트매터·순서·미해결분기·사람이 손으로 덧붙인 tail 보존(§9 직접 편집 허용). ⑥ 노이즈 차단: 일회성 답이면 `ops=[]` → 카드 안 띄움. ⑦ 라이브 Opus 증류는 크레딧 사정상 `MEMORY_MODEL`/`AGENT_MODEL`로 임시 프로바이더 교체 가능.
+> ⚠️ **Phase 8 구현 메모:** ① **성공 판정 = 별도 심판 AI(A안, 사용자 확정)** — 자연어 verify 기준을 그대로 쓰려고 `verify_agent`(Opus)가 화면 증거로 판정. 수행 AI와 분리 = 자기선언 아님(§10). "≥2/4" 규칙과 성공률·승급 계산은 harness 결정적 코드. ② **MVP 범위** = `LEARNING↔ASSISTED` 한 단계만(`_LEVEL_RANK`), `artifact`(다운로드 파일) 판정은 후순위 → 채워졌으면 보수적 실패 처리. ③ **최종 화면 = 마지막 관측**(성공/실패 무관, `act()`에서 매 관측 저장) — 마지막 액션이 실패로 끝나면 그 실패 화면을 봐야 실패 런을 성공으로 졸업 안 시킴(§14-3, code-review 반영). ④ **maturity 자동커밋**은 "배운 규칙"이 아니라 harness 증거 카운터라 인젝션 방어 대상 아님(§9 직접편집·§1 성숙도 카운터=harness). `record_outcome`은 프론트매터만 갱신하고 본문(순서·레슨·사람 tail) 글자 보존. ⑤ **승급/강등 둘 다 대시보드 표시**(code-review 반영 — 강등 침묵 방지). ⑥ ASSISTED가 *행동*을 바꾸는 것(크리티컬만 물음)은 횡단 안전의 크리티컬 게이트 항목 → Phase 8은 **표시까지**. ⑦ 라이브 Opus 심판은 크레딧 사정상 `MEMORY_MODEL`/`AGENT_MODEL`로 임시 프로바이더 교체 가능.
 
 ---
 
@@ -124,12 +124,12 @@
 
 ## Phase 8 — 🟢 점점 나아진다 (증거 기반 졸업) (§10)
 
-- [ ] `verify_success(criteria)` — SOP 프론트매터 구조화 `verify:`(must_appear/must_match/must_not/artifact, **4종 중 ≥2종**) 평가. **자기선언 금지** (§9, §10)
-  - 사건검색 기준(지금 확정): *결과 행 사건번호 == 입력 (끝자리까지 완전일치)*
-- [ ] maturity 레코드: 최근 N=10 검증된 성공률 ≥ T(0.9) → 승급 / 실패·반려 → 강등
-- [ ] LEARNING → ASSISTED **1단계 승급**을 사이드패널 대시보드에 표시 (MVP는 여기까지)
+- [x] `verify_success(criteria)` — SOP 프론트매터 구조화 `verify:`(must_appear/must_match/must_not/artifact, **4종 중 ≥2종**) 평가. **자기선언 금지** (§9, §10) — 별도 심판 에이전트(`verify_agent`)가 화면 증거로 판정, harness `_verify_passed`가 ≥2/4 결정적 규칙으로 환원. `artifact`는 MVP 미평가(채워졌으면 보수적 실패)
+  - 사건검색 기준(지금 확정): *결과 행 사건번호 == 입력 (끝자리까지 완전일치)* → `must_match`로 심판에 전달
+- [x] maturity 레코드: 최근 N=10 검증된 성공률 ≥ T(0.9) → 승급 / 실패·반려 → 강등 — `memory_store.record_outcome`(프론트매터만 갱신, 본문 보존, SOP 파일만 자동 git commit), 승급/강등 대칭
+- [x] LEARNING → ASSISTED **1단계 승급**을 사이드패널 대시보드에 표시 (MVP는 여기까지) — `maturity_update` 메시지 → 레벨 배지·성공 추세(●/○), 승급/강등 로그 한 줄
 
-**✅ 검증:** 성공이 누적되면 대시보드에서 레벨이 LEARNING→ASSISTED로 오르는 게 "눈에 보인다."
+**✅ 검증(자동 달성):** SOP 라우팅 런 → 심판 판정/halt 집계 → `record_outcome` 누적·레벨 재계산 → 10회 성공 시 `LEARNING→ASSISTED` 승급이 `maturity_update`로 대시보드에 표시됨을, 가짜 모델·임시 git repo로 자동검증(27개 통과, `backend/tests/test_maturity.py` 6개). 본문 보존·강등·≥2/4 규칙·halt=실패 포함. ⏳ 실제 scourt 풀루프 + 라이브 Opus 심판은 사용자 검토 대기(크레딧·브라우저 필요).
 
 ---
 
