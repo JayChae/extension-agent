@@ -13,9 +13,9 @@
 ---
 
 ## 📍 현재 위치
-> **Phase 6 구현·자동검증 완료 — 실제 scourt 시연·라이브 Opus 증류·커밋은 사용자 검토 대기. 다음은 Phase 7.** "가르치면 기억한다"가 붙었다: 사이드패널 "가르치기" 버튼 → 작은 입력창에 업무 이름 → 사람이 브라우저에서 직접 시연(+설명 추가) → content.js가 행동마다 `{kind:action, role/name/text/cue/value/url}`을 기록(XPath 아님, 비밀값 블랭킹)해 사이드패널로 즉시 송신 → 종료 시 `record_demo`로 백엔드 전송. **메모리 전담 에이전트**(`memory_agent.py`, Opus)가 행동+설명 trace를 `SopDraft`(구조화 출력)로 증류 → `propose_sop` diff를 승인 카드로 → 사람 원클릭 승인 → harness(`memory_store.py`)가 SOP 파일+`master_index.json`을 **같은 git commit으로 원자적 기록**(모델은 파일 안 씀, §9). 다음 런에서 `route()`가 결정적 라우팅 → `read_sop` 힌트 주입. 가짜 모델+임시 git repo로 자동테스트(16개 전체 통과, `backend/tests/test_learning.py` 포함).
+> **Phase 7 구현·자동검증 완료 — 실제 scourt 시연·라이브 Opus 레슨 증류·커밋은 사용자 검토 대기. 다음은 Phase 8.** "교정으로 배운다"가 붙었다(범위=막힘 경로 중심, 사용자 확정): SOP로 라우팅된 런(`session.active_sop_path`)에서 에이전트가 막혀 `ask_human`을 부르면, 사람의 답(=교정 포함)을 `session.lesson_candidates`에 적재 → 런이 done/halt로 끝나면 `maybe_propose_lesson()`이 **레슨 전담 에이전트**(`memory_agent.py`의 `lesson_agent`, Opus)로 기존 레슨+Q&A를 `LessonProposal(ops[])`로 증류 → `propose_lesson` 카드 → 사람 원클릭 승인 → harness(`memory_store.apply_lessons`)가 SOP의 `## 레슨` 섹션에 **화해(ADD/EDIT/STRENGTHEN)** 병합 후 SOP 파일만 단일 git commit(모델은 파일 안 씀, §9). 다음 런에서 `read_sop`가 그 레슨을 로드 → 안 물음. 가짜 모델+임시 git repo로 자동테스트(21개 전체 통과, `backend/tests/test_lessons.py` 5개 포함).
 >
-> ⚠️ **Phase 6 구현 메모:** ① **수행 vs 학습 에이전트 분리**(사용자 지시) — 수행은 Sonnet 스텝 루프(`agent.py`), 학습은 **메모리 전담 Opus 에이전트**(`memory_agent.py`)가 별도로. 후자가 앞으로 모든 메모리 쓰기 *제안*의 집(Phase 7 교정→레슨 재사용). ② "가르치기"는 스텝 루프와 분리된 **harness 파이프라인**(`propose_sop_diff`를 스텝 루프 도구로 두지 않음) — 시연 중엔 도는 `agent.run()`이 없고, 모델은 쓰기 경로에 못 들어옴(§9 인젝션 방어). ③ **시연=행동+사람 설명**(사용자 지시) — 녹화 중 "설명 추가"로 의미/조건을 함께 적어 `events[]`에 시간순으로 엮음 → 모델이 조건·분기를 학습, 미해결 분기는 `open_branches`(TODO). 승인 카드에서 분기 설명을 더 적으면 레슨으로 첨부. ④ 증류는 별도 asyncio 태스크(STOP 취소·receive 루프 응답성 유지), git은 `asyncio.to_thread`. ⑤ 라우팅은 MVP 약한 휴리스틱(SOP 여럿이면 오라우팅 가능 — 향후 강화). ⑥ 신규 의존성 `pyyaml`(프론트매터 렌더). ⑦ 라이브 Opus 증류는 크레딧 사정상 `MEMORY_MODEL`/`AGENT_MODEL`로 임시 프로바이더 교체 가능.
+> ⚠️ **Phase 7 구현 메모:** ① **범위 = 막힘 경로 중심**(사용자 확정) — §7 경로②·③을 `ask_human` 한 경로로 합침(사람 답이 단순 정보든 교정이든 동일하게 레슨 후보). SOP 초안 "반려+이유→재증류"(경로③ 일부)는 넣지 않음. ② **레슨 전담 에이전트는 `memory_agent.py`에 추가**(`lesson_agent`, `distill_lesson()`) — 수행 에이전트와 분리 유지, 모델은 제안만(`LessonProposal`), harness가 승인 후 기록(§9 인젝션 방어). ③ **증류는 런 종료 시점**(재개 사이클 전체 Q&A를 한 번에 → 카드 하나), `run_task` 끝에서 인라인 await(STOP 취소 경로 유지). ④ **화해**: ADD=추가, EDIT=모순 줄 교체(=반복 모순 은퇴, recency 우선), STRENGTHEN=중요도 +1 → 레슨 줄에 `(×N)` 표기. EDIT/STRENGTHEN 대상은 `target`에 기존 레슨 본문 정확 일치(못 찾으면 ADD 폴백). ⑤ `apply_lessons`는 `## 레슨` 섹션만 재작성 — 프론트매터·순서·미해결분기·사람이 손으로 덧붙인 tail 보존(§9 직접 편집 허용). ⑥ 노이즈 차단: 일회성 답이면 `ops=[]` → 카드 안 띄움. ⑦ 라이브 Opus 증류는 크레딧 사정상 `MEMORY_MODEL`/`AGENT_MODEL`로 임시 프로바이더 교체 가능.
 
 ---
 
@@ -112,11 +112,13 @@
 
 ## Phase 7 — 🟢 교정으로 배운다 (레슨 누적 + 화해) (§7 경로②③)
 
-- [ ] 막힘/반려 시 사람 교정 → Opus가 레슨으로 증류 → 승인 후 SOP에 첨부
-- [ ] **화해**: 새 레슨마다 ADD / EDIT / STRENGTHEN 중 택1 (단순 append 금지 — 모순 더미 방지) (§7)
-- [ ] 반복 모순 레슨은 은퇴(recency 우선)
+> 범위=막힘 경로 중심(사용자 확정): 경로②·③을 `ask_human` 한 경로로 합침. SOP 초안 "반려+이유→재증류"(경로③ 일부)는 후순위.
 
-**✅ 검증:** 한 번 교정해준 실수(예: 사건번호 끝자리 일치)를 다음 런에서 안 묻고 스스로 지킨다.
+- [x] 막힘 시 사람 답(=교정 포함) → Opus(`lesson_agent`)가 레슨으로 증류 → 승인(`approve_lesson`) 후 SOP `## 레슨`에 첨부
+- [x] **화해**: 새 레슨마다 ADD / EDIT / STRENGTHEN 중 택1 (단순 append 금지 — 모순 더미 방지) (§7) — `memory_store.apply_lessons`
+- [x] 반복 모순 레슨은 은퇴(recency 우선) — EDIT가 모순 줄을 새 본문으로 교체
+
+**✅ 검증(자동 달성):** SOP 라우팅 런 → `ask_human` → 사람 교정 → `propose_lesson` → 승인 → 화해 병합·git 커밋 → 다음 런에서 `read_sop`가 그 레슨을 로드(안 물음)를, 가짜 모델·임시 git repo로 자동검증(21개 통과, `backend/tests/test_lessons.py`). ⏳ 실제 scourt 교정 + 라이브 Opus 레슨 증류 풀루프는 사용자 검토 대기.
 
 ---
 

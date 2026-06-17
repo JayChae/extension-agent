@@ -76,6 +76,10 @@ class Session:
     pending_messages: list | None = None  # ask_human 대기 중 보관하는 message_history(§6)
     pending_call_id: str | None = None  # 재개 시 답을 매칭할 ask_human tool_call_id
     pending_sop: dict | None = None  # 승인 대기 중인 SOP 제안 {site, name, draft}(§7 학습)
+    active_sop_path: str | None = None  # 이번 런이 라우팅된 SOP(레슨을 붙일 대상)(§7 경로②)
+    last_question: str | None = None  # 직전 ask_human 질문(답과 짝지어 레슨 후보로)
+    lesson_candidates: list = field(default_factory=list)  # [{question, answer}, ...] 런 종료 시 증류
+    pending_lesson: dict | None = None  # 승인 대기 중인 레슨 제안 {sop_path, ops}(§7 화해)
 
     def reset(self) -> None:
         """새 작업 시작 직전 카운터 초기화 + 잔여 관측 비우기."""
@@ -87,6 +91,10 @@ class Session:
         self.recent_hashes.clear()
         self.last_tool_sig = None
         self.pending_sop = None
+        self.active_sop_path = None
+        self.last_question = None
+        self.lesson_candidates = []
+        self.pending_lesson = None
         self.clear_pending()
         while not self.obs_q.empty():
             self.obs_q.get_nowait()

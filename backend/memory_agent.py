@@ -9,6 +9,7 @@
 """
 
 import os
+from typing import Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
@@ -97,4 +98,65 @@ async def distill(events: list[dict]) -> SopDraft:
     """시연 기록(행동+설명)을 SopDraft로 증류한다. 모델은 런 시점에 주입(키 없이 import 가능)."""
     trace = _render_trace(events)
     result = await memory_agent.run(trace, model=MEMORY_MODEL)
+    return result.output
+
+
+# ── Phase 7: 교정→레슨 증류·화해(ADD/EDIT/STRENGTHEN) (§7 경로②) ──────────────────
+# 같은 메모리 에이전트 인프라를 재사용하되 output_type만 다른 별도 에이전트다.
+# 에이전트가 막혀서 물은(ask_human) 질문과 사람의 답을 SOP에 쌓을 재사용 레슨으로 증류한다.
+
+LESSON_PROMPT = """\
+너는 한 SOP(작업 절차서)에 쌓이는 레슨(주의사항)을 관리하는 메모리 작성가다.
+에이전트가 그 업무를 하다 막혀서 사람에게 물은 질문과, 사람이 준 답을 받는다.
+그 답에서 *다음에도 통하는 재사용 규칙*만 골라 레슨으로 만든다.
+
+[원칙]
+- 일회성 값(이번 사건번호 "2024가단12345" 등)이나 이 런에만 해당하는 답은 레슨이 아니다 → ops를 빈 리스트로.
+- 재사용 가능한 규칙(예: "법원이 지원이면 '...지원'까지 정확히 선택")이면 레슨으로 만든다.
+- 기존 레슨 목록(번호 매김)이 함께 주어진다. 새 레슨마다 셋 중 하나를 고른다:
+  - ADD: 기존에 없는 새 규칙 → text에 레슨 본문.
+  - EDIT: 기존 레슨이 *틀렸거나 모순*이면 그 줄을 교체 → target에 기존 레슨 본문 그대로, text에 새 본문.
+  - STRENGTHEN: 이미 아는 규칙을 사람이 한 번 더 확인해줌 → target에 기존 레슨 본문, text에 (다듬은) 본문.
+- 레슨 본문은 짧은 명령형 한 줄로(앞에 ⚠️ 같은 기호는 붙이지 마라 — harness가 렌더한다).
+"""
+
+
+class LessonOp(BaseModel):
+    """기존 레슨 더미에 새 교정을 화해시키는 한 연산(§7)."""
+
+    op: Literal["ADD", "EDIT", "STRENGTHEN"] = Field(description="화해 종류")
+    text: str = Field(description="새/수정된 레슨 본문(기호 없이 한 줄)")
+    target: str | None = Field(
+        default=None, description="EDIT/STRENGTHEN이 가리키는 기존 레슨 본문(정확 일치)"
+    )
+
+
+class LessonProposal(BaseModel):
+    """이번 런의 Q&A에서 증류된 레슨 화해 제안. ops가 비면 배울 게 없다는 뜻."""
+
+    ops: list[LessonOp] = Field(default_factory=list)
+
+
+lesson_agent = Agent(output_type=LessonProposal, instructions=LESSON_PROMPT)
+
+
+def _render_qa(sop_goal: str, existing_lessons: list[str], qa_pairs: list[dict]) -> str:
+    """SOP 목표 + 기존 레슨(번호) + 이번 런의 질문/답을 모델 입력 문자열로 엮는다."""
+    lines = [f"[SOP 목표] {sop_goal}", "", "[기존 레슨]"]
+    lines += [f"{i}. {t}" for i, t in enumerate(existing_lessons, 1)] or ["(없음)"]
+    lines += ["", "[이번 런에서 막혀 물은 것과 사람의 답]"]
+    for qa in qa_pairs:
+        q = (qa.get("question") or "").strip()
+        a = (qa.get("answer") or "").strip()
+        lines.append(f"- 질문: {q}")
+        lines.append(f"  답: {a}")
+    return "\n".join(lines)
+
+
+async def distill_lesson(
+    sop_goal: str, existing_lessons: list[str], qa_pairs: list[dict]
+) -> LessonProposal:
+    """ask_human Q&A를 기존 레슨과 화해된 LessonProposal로 증류한다(모델은 런 시점 주입)."""
+    prompt = _render_qa(sop_goal, existing_lessons, qa_pairs)
+    result = await lesson_agent.run(prompt, model=MEMORY_MODEL)
     return result.output

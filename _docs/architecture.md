@@ -186,6 +186,8 @@ def submit_document(...): ...
 
 > **Phase 6 구현 형태(확정):** 학습은 수행과 **분리된 전용 에이전트**가 한다 — 수행은 Sonnet 스텝 루프(`agent.py`), 학습은 **메모리 전담 Opus 에이전트**(`memory_agent.py`)가 별도로(이 파일이 앞으로 모든 메모리 쓰기 *제안*의 집 — 경로②③ 레슨·화해도 여기 재사용). 시연은 **행동 + 사람의 설명(내레이션)을 함께** 기록해(`{kind:action|note}` 시간순) 모델이 조건·분기를 배우게 한다 — 행동만 녹화하면 분기 없는 매크로가 된다. 증류·승인·기록은 스텝 루프가 아니라 harness 파이프라인(`record_demo`→`distill`→`propose_sop`→`approve_sop`→`memory_store`가 git 원자 커밋).
 
+> **Phase 7 구현 형태(확정):** 경로②·③을 **`ask_human` 한 경로로 합쳤다**(MVP 범위, 사용자 확정) — 사람의 답이 단순 정보든 교정이든 동일하게 레슨 후보다. SOP로 라우팅된 런이 막혀 물으면 그 Q&A를 모아, 런 종료 시 **레슨 전담 에이전트**(`memory_agent.py`의 `lesson_agent`, Opus)가 기존 레슨과 **화해**해 `LessonProposal(ops[])`로 증류 → `propose_lesson` 카드 → 사람 원클릭 승인 → harness(`memory_store.apply_lessons`)가 SOP의 `## 레슨` 섹션에만 병합 후 단일 git 커밋. **화해 매핑:** ADD=새 줄, EDIT=모순 줄 교체(=반복 모순 은퇴, recency 우선), STRENGTHEN=중요도 +1(`(×N)` 표기). 일회성 답이면 `ops=[]`로 카드 자체를 안 띄운다. SOP 초안 "반려+이유→재증류"(경로③의 다른 절반)는 후순위.
+
 ### 세 신호 → 증류 → 화해 → 승인 → git
 
 ```
