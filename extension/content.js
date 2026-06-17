@@ -174,6 +174,19 @@ function detectCaptcha() {
   return document.querySelector(CAPTCHA_SELECTORS) !== null;
 }
 
+// 네이티브 다이얼로그 버퍼(§4) — MAIN world 훅(main_hook.js)이 window.alert/confirm을 가로채
+// 자동 처리한 뒤 메시지를 CustomEvent로 보낸다. content는 못 닫으므로 MAIN 예외. 다음 관측에 실어 전달.
+let pendingDialogs = [];
+document.addEventListener("__ai_newbie_dialog__", (e) => {
+  try {
+    const d = JSON.parse(e.detail);
+    pendingDialogs.push({ kind: d.kind, message: stripMarkers(String(d.message || "")).slice(0, 200) });
+    if (pendingDialogs.length > 10) pendingDialogs.shift(); // 폭주 방어
+  } catch {
+    /* 위조 이벤트 등 — 무시 */
+  }
+});
+
 // 관측(observation) 한 덩어리. elements/tables가 신뢰 불가 페이지 데이터 채널이다(§3).
 // 탈출용 마커 토큰은 위에서 이미 제거(stripMarkers). 실제 <UNTRUSTED_PAGE_DATA> 프롬프트
 // 펜스는 모델에 넣는 지점(Phase 4 프롬프트 조립)에서 이 채널을 감싸 적용한다.
@@ -184,7 +197,12 @@ function observe(extra) {
     { ok: true, page: { url: location.href, title: document.title }, elements, tables },
     extra || {},
   );
-  if (detectCaptcha()) obs.captcha = true; // 안전 플래그는 마지막에 — extra가 덮지 못하게(§4)
+  // 안전/정보 채널은 마지막에 — extra가 덮지 못하게(§4).
+  if (pendingDialogs.length) {
+    obs.dialogs = pendingDialogs;
+    pendingDialogs = [];
+  }
+  if (detectCaptcha()) obs.captcha = true;
   return obs;
 }
 
@@ -253,7 +271,12 @@ async function executeAction(action) {
         return await settleAndObserve({ note: `클릭: [${action.index}]` });
       case "type":
         doType(resolve(action.index), action.text || "");
-        return await settleAndObserve({ note: `입력: [${action.index}] "${action.text || ""}"` });
+        // 금고가 채운 비밀값(fill_credential)은 note에 echo하지 않는다 — 누출 방지(§11).
+        return await settleAndObserve({
+          note: action.secret
+            ? `입력: [${action.index}] (비밀값)`
+            : `입력: [${action.index}] "${action.text || ""}"`,
+        });
       case "select":
         doSelect(resolve(action.index), action.option || "");
         return await settleAndObserve({ note: `선택: [${action.index}] "${action.option || ""}"` });

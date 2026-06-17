@@ -17,6 +17,13 @@
       "matches": ["https://scourt.go.kr/*", "https://*.scourt.go.kr/*"],
       "js": ["content.js"],
       "all_frames": true
+    },
+    {
+      "matches": ["https://scourt.go.kr/*", "https://*.scourt.go.kr/*"],
+      "js": ["main_hook.js"],
+      "all_frames": true,
+      "world": "MAIN",
+      "run_at": "document_start"
     }
   ]
 }

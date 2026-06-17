@@ -14,6 +14,9 @@ node_modules/
 # Audit log (운영 로그 — git 미추적, §11)
 backend/audit/
 
+# 🔐 자격증명 금고 (암호문이라도 git 미추적 — 방어심층, §11)
+backend/vault/
+
 # Build artifacts
 dist/
 build/
