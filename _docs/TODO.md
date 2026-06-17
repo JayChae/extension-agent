@@ -13,7 +13,9 @@
 ---
 
 ## 📍 현재 위치
-> **Phase 8 구현·자동검증 완료 — 실제 scourt 풀루프·라이브 Opus 심판은 사용자 검토 대기. 다음은 🔒 횡단 안전 최소선.** "점점 나아진다"(증거 기반 졸업)가 붙었다: SOP로 라우팅된 런이 끝나면 `maybe_verify_and_promote()`가 ① done이면 **별도 심판 에이전트**(`memory_agent.py`의 `verify_agent`, Opus)에게 최종 화면(`session.last_observation`)+입력값(`session.task_text`)+`verify` 기준을 줘 기준별 통과/실패를 받고(자기선언 금지), harness `_verify_passed`가 "4종 중 ≥2종 채워짐 & 전부 통과 → 성공" 결정적 규칙으로 환원 ② 가드레일 halt면 화면 판정 없이 실패로 집계 → `memory_store.record_outcome`가 SOP 프론트매터 `maturity.success_window`(최근 N=10)에 누적·레벨 재계산(성공률 ≥0.9 → `LEARNING↔ASSISTED`, 승급/강등 대칭) 후 SOP 파일만 단일 git commit(자동 — 결정적 증거 카운터라 사람 승인 불필요, §10) → `maturity_update` 메시지로 사이드패널 대시보드에 레벨·성공 추세(●/○) 표시, 승급/강등 시 로그 한 줄. 가짜 모델+임시 git repo로 자동테스트(27개 전체 통과, `backend/tests/test_maturity.py` 6개 포함).
+> **Phase 9A(🔒 횡단 안전 게이트 핵심) 구현·자동검증 완료 — 다음은 🔒 9B(자격증명 금고 + 네이티브 alert/confirm 훅).** 안전 섹션을 크기 차이로 두 단계로 분할(사용자 확정): 9A=결정적 harness 안전 레일 4개(① 크리티컬 액션 하드 게이트=제출류 라벨이면 성숙도 무관 강제 승인, Pydantic AI `ApprovalRequired`로 `click` 도구가 멈추고 승인 카드→`action_approval` 무상태 재개 ② 도메인 allowlist 백엔드(`safety.domain_allowed`, env 설정값화)+레이트 리미터(`session` 롤링 윈도우) ③ CAPTCHA 감지→`CaptchaHandoff` 핸드오프 ④ 평문 감사 로그 `audit.py`). 신규 `backend/safety.py`·`backend/audit.py`, 가짜 모델+가짜 브라우저로 자동검증(7개 추가, 전체 34개 통과). 9B(금고·다이얼로그 훅)는 다음 단계.
+>
+> **(이전) Phase 8 구현·자동검증 완료 — 실제 scourt 풀루프·라이브 Opus 심판은 사용자 검토 대기.** "점점 나아진다"(증거 기반 졸업)가 붙었다: SOP로 라우팅된 런이 끝나면 `maybe_verify_and_promote()`가 ① done이면 **별도 심판 에이전트**(`memory_agent.py`의 `verify_agent`, Opus)에게 최종 화면(`session.last_observation`)+입력값(`session.task_text`)+`verify` 기준을 줘 기준별 통과/실패를 받고(자기선언 금지), harness `_verify_passed`가 "4종 중 ≥2종 채워짐 & 전부 통과 → 성공" 결정적 규칙으로 환원 ② 가드레일 halt면 화면 판정 없이 실패로 집계 → `memory_store.record_outcome`가 SOP 프론트매터 `maturity.success_window`(최근 N=10)에 누적·레벨 재계산(성공률 ≥0.9 → `LEARNING↔ASSISTED`, 승급/강등 대칭) 후 SOP 파일만 단일 git commit(자동 — 결정적 증거 카운터라 사람 승인 불필요, §10) → `maturity_update` 메시지로 사이드패널 대시보드에 레벨·성공 추세(●/○) 표시, 승급/강등 시 로그 한 줄. 가짜 모델+임시 git repo로 자동테스트(27개 전체 통과, `backend/tests/test_maturity.py` 6개 포함).
 >
 > ⚠️ **Phase 8 구현 메모:** ① **성공 판정 = 별도 심판 AI(A안, 사용자 확정)** — 자연어 verify 기준을 그대로 쓰려고 `verify_agent`(Opus)가 화면 증거로 판정. 수행 AI와 분리 = 자기선언 아님(§10). "≥2/4" 규칙과 성공률·승급 계산은 harness 결정적 코드. ② **MVP 범위** = `LEARNING↔ASSISTED` 한 단계만(`_LEVEL_RANK`), `artifact`(다운로드 파일) 판정은 후순위 → 채워졌으면 보수적 실패 처리. ③ **최종 화면 = 마지막 관측**(성공/실패 무관, `act()`에서 매 관측 저장) — 마지막 액션이 실패로 끝나면 그 실패 화면을 봐야 실패 런을 성공으로 졸업 안 시킴(§14-3, code-review 반영). ④ **maturity 자동커밋**은 "배운 규칙"이 아니라 harness 증거 카운터라 인젝션 방어 대상 아님(§9 직접편집·§1 성숙도 카운터=harness). `record_outcome`은 프론트매터만 갱신하고 본문(순서·레슨·사람 tail) 글자 보존. ⑤ **승급/강등 둘 다 대시보드 표시**(code-review 반영 — 강등 침묵 방지). ⑥ ASSISTED가 *행동*을 바꾸는 것(크리티컬만 물음)은 횡단 안전의 크리티컬 게이트 항목 → Phase 8은 **표시까지**. ⑦ 라이브 Opus 심판은 크레딧 사정상 `MEMORY_MODEL`/`AGENT_MODEL`로 임시 프로바이더 교체 가능.
 
@@ -137,14 +139,16 @@
 
 > 안전은 마지막 단계가 아니라 처음부터 깔린다. 아래는 MVP 출시 전 반드시 켜져 있어야 할 최소선.
 
-- [ ] **크리티컬 액션 하드 게이트**: 비가역 액션(제출 등) allowlist + `always_confirm` → 성숙도/확신도 무관 강제 승인. 실행 직전 해석된 라벨/역할이 의도와 일치하는지 검증 (§4, §11)
-- [ ] **도메인 allowlist** `*.scourt.go.kr`(주 사이트 `ecfs.scourt.go.kr`) + 레이트 리미터 (§11)
-- [ ] **CAPTCHA/안티봇 감지 → STOP·인간 핸드오프** (풀거나 우회 안 함) (§4)
-- [ ] **로그인·공동인증서**: 비밀값은 백엔드 금고(암호화) 1회 등록 → `fill_credential(index, kind)`로 입력, **Claude는 값 못 봄**. 인증서는 DOM 확인됨(§15) (§11)
-- [ ] **네이티브 `alert/confirm` 훅**: MAIN world 주입 작은 훅으로 가로채 자동수락+관측 전달 (content script 얇게 원칙의 유일한 예외) (§4)
-- [ ] **평문 감사 로그**: 관측·제안 액션·인간 승인·실행 결과 기록 (해시체인은 v2) (§11, §13)
+> **진행 메모(Phase 9):** 항목 크기 차이가 커서 **두 단계로 분할**(사용자 확정). 9A=결정적 harness 안전 레일 4개 완료, 9B=자격증명 금고·다이얼로그 훅(아래 `[ ]`)은 다음 단계.
 
-**✅ 검증:** 제출류 버튼은 성숙도와 무관하게 **항상** 승인 카드가 뜬다. 비밀값은 로그·관측 어디에도 안 남는다.
+- [x] **크리티컬 액션 하드 게이트**: 비가역 라벨(제출 등) 키워드 allowlist → 성숙도/확신도 무관 강제 승인. Pydantic AI `ApprovalRequired`(공식문서 확인)로 `click` 도구에서 발생 → 런이 `DeferredToolRequests.approvals`로 종료 → 사이드패널 승인 카드 → `action_approval`로 무상태 재개(승인 시 도구 본문 재실행=실제 클릭, 거부 시 모델에 통보). 라벨은 백엔드가 관측 elements에서 직접 읽음(신뢰 경계). `always_confirm` SOP 프론트매터 연동은 후순위(키워드 allowlist로 충분 — 과게이팅=안전측) (§4, §11)
+- [x] **도메인 allowlist** + 레이트 리미터 (§11) — `safety.domain_allowed`(백엔드 신뢰 경계, env `ALLOWED_DOMAINS`로 설정값화 §15-5, 빈 값은 기본 scourt로 폴백), `navigate` 도구가 거부 시 WS 왕복 없이 모델에 통보. 레이트 리미터는 `session._guard_before` 롤링 윈도우(`RATE_MAX`/`RATE_WINDOW`, 폭주 백스톱). 익스텐션 `SCOURT_HOST`는 다른 런타임 방어선으로 유지(중복 아님)
+- [x] **CAPTCHA/안티봇 감지 → STOP·인간 핸드오프** (§4) — content.js `detectCaptcha`가 관측에 `captcha:true` 플래그(안전 플래그라 `extra`에 안 덮임) → `session._guard_after`가 `CaptchaHandoff`로 중단 → 핸드오프 안내(풀거나 우회 안 함). 외부 차단이라 SOP 성숙도엔 미집계
+- [ ] **로그인·공동인증서**: 비밀값은 백엔드 금고(암호화) 1회 등록 → `fill_credential(index, kind)`로 입력, **Claude는 값 못 봄**. 인증서는 DOM 확인됨(§15) (§11) — **9B(다음 단계)**
+- [ ] **네이티브 `alert/confirm` 훅**: MAIN world 주입 작은 훅으로 가로채 자동수락+관측 전달 (content script 얇게 원칙의 유일한 예외) (§4) — **9B(다음 단계)**
+- [x] **평문 감사 로그**: 관측·제안 액션·인간 승인·실행 결과 기록 (해시체인은 v2) (§11, §13) — `audit.py`(append-only JSONL, git 미추적). `session.act`(action/observation 요약), 승인·ask_human·outcome 지점에 훅. 비밀값 비기록(관측에 value 없음 §3, type 본문 미기록)
+
+**✅ 검증(9A 자동 달성):** 제출 버튼 클릭 → 승인 카드(성숙도 무관) → 승인 시 실제 클릭/거부 시 통보, 도메인 거부, 레이트 리밋 정지, CAPTCHA 핸드오프, 감사 로그(요약만·입력값 미기록)를 가짜 모델+가짜 브라우저로 자동검증(7개, `backend/tests/test_safety.py`; 전체 34개 통과). ⏳ 실제 scourt 풀루프는 사용자 검토 대기. **9B(금고·다이얼로그 훅)는 다음 단계.**
 
 ---
 

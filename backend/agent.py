@@ -7,10 +7,11 @@ WS 왕복을 직접 수행하고, 반환한 관측 문자열이 모델이 보는
 import os
 from pathlib import Path
 
-from pydantic_ai import Agent, CallDeferred, DeferredToolRequests, RunContext
+from pydantic_ai import Agent, ApprovalRequired, CallDeferred, DeferredToolRequests, RunContext
 from pydantic_ai.models.anthropic import AnthropicModelSettings
 from pydantic_ai.output import ToolOutput
 
+import safety
 from session import Session
 
 MEMORY_DIR = Path(__file__).resolve().parent.parent / "memory"
@@ -116,6 +117,11 @@ async def perceive(ctx: RunContext[Session]) -> str:
 @agent.tool
 async def click(ctx: RunContext[Session], index: int) -> str:
     """인덱스 [index] 요소를 클릭한다."""
+    # 🔒 크리티컬 게이트(§4·§11): 비가역 라벨(제출 등)이면 성숙도·확신도 무관 사람 승인 강제.
+    # act() 전에 검사 — 승인 전엔 화면을 안 건드린다. 승인되면 본문이 재실행돼 통과한다.
+    label = safety.label_for_index(ctx.deps.last_observation, index)
+    if safety.is_critical(label) and not ctx.tool_call_approved:
+        raise ApprovalRequired()
     return render_observation(await ctx.deps.act({"kind": "click", "index": index}))
 
 
@@ -134,6 +140,9 @@ async def select(ctx: RunContext[Session], index: int, option: str) -> str:
 @agent.tool
 async def navigate(ctx: RunContext[Session], url: str) -> str:
     """url로 이동한다. 이동 후 페이지가 새로 로드되므로 다음에 반드시 perceive를 호출하라."""
+    # 🔒 도메인 allowlist(§11) — 백엔드가 신뢰 경계. 거부면 WS 왕복 없이 모델에 알린다(다른 행동 유도).
+    if not safety.domain_allowed(url):
+        return f"허용 도메인 아님: {url} — 이 도메인으로는 이동할 수 없다."
     return render_observation(await ctx.deps.act({"kind": "navigate", "url": url}))
 
 

@@ -10,10 +10,12 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic_ai import DeferredToolRequests, DeferredToolResults
 
+import audit
 import memory_store
+import safety
 from agent import MODEL, agent, render_observation
 from memory_agent import distill, distill_lesson, verify_run
-from session import RunHalted, Session, Stopped
+from session import CaptchaHandoff, RunHalted, Session, Stopped
 
 app = FastAPI()
 
@@ -42,9 +44,20 @@ async def run_task(
             deferred_tool_results=deferred_results,
         )
         if isinstance(result.output, DeferredToolRequests):
+            out = result.output
+            # 🔒 크리티컬 액션 승인 우선(§4·§11) — 제출 등 비가역 라벨은 성숙도/확신도 무관 사람 승인.
+            if out.approvals:
+                acall = out.approvals[0]
+                idx = acall.args_as_dict().get("index")
+                label = safety.label_for_index(session.last_observation, idx)
+                session.pending_messages = result.all_messages()
+                session.pending_approval_id = acall.tool_call_id
+                audit.log("approval_requested", label=label, index=idx)
+                await session.ws.send_json({"type": "approve_action", "label": label, "index": idx})
+                return
             # 에이전트가 ask_human을 불렀다 → 질문을 푸시하고 재개에 필요한 상태를 보관.
             # 시스템 프롬프트가 "한 번에 도구 하나"를 강제하므로 calls는 ask_human 하나로 본다.
-            call = result.output.calls[0]
+            call = out.calls[0]
             args = call.args_as_dict()
             session.pending_messages = result.all_messages()
             session.pending_call_id = call.tool_call_id
@@ -67,6 +80,10 @@ async def run_task(
         await maybe_propose_lesson(session)  # 런 종료 → 이번에 물어본 것을 레슨으로(§7 경로②)
     except Stopped:
         pass  # STOP은 이미 클라이언트에 통지됨
+    except CaptchaHandoff as e:
+        # CAPTCHA는 외부 차단 — 사람 핸드오프만 알리고 SOP 성숙도엔 페널티 주지 않는다(§4).
+        await session.ws.send_json({"type": "backend_echo", "text": f"핸드오프: {e.reason}"})
+        audit.log("captcha_handoff", reason=e.reason)
     except RunHalted as e:
         await session.ws.send_json({"type": "backend_echo", "text": f"중단(가드레일): {e.reason}"})
         await maybe_verify_and_promote(session, success=False)  # 가드레일 중단 = 실패로 집계(§10)
@@ -186,6 +203,7 @@ async def maybe_verify_and_promote(session: Session, success: bool | None = None
             return
         success = _verify_passed(verify, verdict)
     res = await asyncio.to_thread(memory_store.record_outcome, sop_path, success)
+    audit.log("outcome", path=sop_path, success=success, level=res["level"])
     await session.ws.send_json(
         {
             "type": "maturity_update",
@@ -229,6 +247,7 @@ async def ws(websocket: WebSocket):
                 if not session.pending_messages:
                     continue
                 answer = msg.get("text", "")
+                audit.log("ask_human", question=session.last_question, answer=answer)
                 # SOP 따라 일하다 막혀 물은 거라면, 질문+답을 런 종료 시 레슨으로 증류할 후보로 적재(§7).
                 if session.active_sop_path and session.last_question is not None:
                     session.lesson_candidates.append(
@@ -237,6 +256,21 @@ async def ws(websocket: WebSocket):
                 session.last_question = None
                 results = DeferredToolResults()
                 results.calls[session.pending_call_id] = answer
+                history = session.pending_messages
+                session.clear_pending()
+                session.resume()
+                session.task = asyncio.create_task(
+                    run_task(session, message_history=history, deferred_results=results)
+                )
+
+            elif mtype == "action_approval":
+                # 🔒 크리티컬 액션 승인/거부를 받아 무상태로 재개한다(§4·§11). 대기 중이 아니면 무시.
+                if not session.pending_messages or not session.pending_approval_id:
+                    continue
+                approved = bool(msg.get("approved"))
+                audit.log("approval", approved=approved)
+                results = DeferredToolResults()
+                results.approvals[session.pending_approval_id] = approved
                 history = session.pending_messages
                 session.clear_pending()
                 session.resume()

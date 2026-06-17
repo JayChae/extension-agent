@@ -11,6 +11,9 @@ node_modules/
 .env*
 !.env.example
 
+# Audit log (운영 로그 — git 미추적, §11)
+backend/audit/
+
 # Build artifacts
 dist/
 build/

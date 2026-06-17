@@ -166,16 +166,26 @@ function tablesToMarkdown() {
   return out;
 }
 
+// CAPTCHA/안티봇 위젯 감지(§4) — 풀거나 우회하지 않고 백엔드가 사람에게 핸드오프하도록 플래그만 단다.
+const CAPTCHA_SELECTORS =
+  'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"],' +
+  ' .g-recaptcha, .h-captcha, .cf-turnstile, [data-sitekey]';
+function detectCaptcha() {
+  return document.querySelector(CAPTCHA_SELECTORS) !== null;
+}
+
 // 관측(observation) 한 덩어리. elements/tables가 신뢰 불가 페이지 데이터 채널이다(§3).
 // 탈출용 마커 토큰은 위에서 이미 제거(stripMarkers). 실제 <UNTRUSTED_PAGE_DATA> 프롬프트
 // 펜스는 모델에 넣는 지점(Phase 4 프롬프트 조립)에서 이 채널을 감싸 적용한다.
 function observe(extra) {
   const elements = buildIndex();
   const tables = tablesToMarkdown();
-  return Object.assign(
+  const obs = Object.assign(
     { ok: true, page: { url: location.href, title: document.title }, elements, tables },
     extra || {},
   );
+  if (detectCaptcha()) obs.captcha = true; // 안전 플래그는 마지막에 — extra가 덮지 못하게(§4)
+  return obs;
 }
 
 // ───────────────────────── 행동(Action) ─────────────────────────

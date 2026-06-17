@@ -131,6 +131,8 @@
 - **CAPTCHA/안티봇 감지 시 STOP→인간 핸드오프** — 하드코딩, 풀거나 우회하지 않음(ToS 준수, 인젝션 저항).
 - **네이티브 JS 다이얼로그(`alert`/`confirm`) 자동 처리:** scourt는 네이티브 경고창을 띄움(기존 RPA가 `switch_to.alert`로 처리). content script(isolated world)는 이 창을 못 닫으므로, 페이지 스크립트 실행 전 **MAIN world에 주입한 작은 훅으로 `window.alert/confirm`을 가로채** 자동 수락 + 메시지를 모델 관측으로 전달. "content script는 얇게(isolated)" 원칙의 *유일한* MAIN-world 예외.
 
+> **Phase 9A 구현 형태(확정) — 횡단 안전 게이트 핵심.** 안전 섹션을 크기 차이로 두 단계로 분할: 9A=결정적 harness 레일 4개, 9B(자격증명 금고·alert/confirm 훅)는 다음 단계. ① **크리티컬 게이트**: 행동이 일반 `click` 도구 하나라 *별도 submit 도구*가 아니라, `click`이 대상 인덱스의 라벨을 **현재 관측 elements에서 직접 읽어**(`safety.label_for_index`, 백엔드가 신뢰 경계) 키워드 allowlist(`CRITICAL_KEYWORDS`: 제출/납부/취하/송달 등)에 걸리면 Pydantic AI **`ApprovalRequired`**(공식문서 확인, `tool_call_approved`로 재진입 판정)를 던진다 → 런이 `DeferredToolRequests.approvals`로 종료 → 사이드패널 승인 카드 → `action_approval`로 무상태 재개(`results.approvals[id]=bool`). 승인 시 **도구 본문이 재실행돼 실제 클릭**(ask_human의 `CallDeferred`는 본문 미재실행과 대비), 거부 시 모델에 통보. *비가역 커밋 지점=제출 클릭*이라 click만 게이트(type/select는 미게이트). `always_confirm` SOP 프론트매터 연동은 후순위 — 키워드 allowlist의 과게이팅은 안전측 실패라 MVP 수용. ② **도메인 allowlist**: `navigate` 도구가 `safety.domain_allowed`로 검사(거부 시 WS 왕복 없이 모델 통보), env `ALLOWED_DOMAINS`로 설정값화(빈 값은 기본 scourt 폴백, `<all_urls>` 금지 §15-5). 익스텐션 `SCOURT_HOST`(content/SW)는 다른 런타임 방어선으로 유지(중복 아님, 방어심층). **레이트 리미터**는 `session._guard_before` 롤링 윈도우(폭주 백스톱). ③ **CAPTCHA**: content.js `detectCaptcha`(recaptcha/hcaptcha/turnstile 셀렉터)가 관측에 `captcha:true`(안전 플래그라 `extra`에 안 덮이게 마지막에 set) → `_guard_after`가 `CaptchaHandoff`로 중단·핸드오프(풀거나 우회 안 함), 외부 차단이라 SOP 성숙도 미집계.
+
 ---
 
 ## 5. 에이전트 도구 (= 권한 전부)
@@ -420,11 +422,11 @@ maturity:
 |---|---|
 | **API 키 유출** | LLM 키는 **백엔드에만.** 익스텐션은 누구나 압축해제 가능 → 시크릿 없음. 익스텐션은 사용자 인증 토큰만 |
 | **로그인·공동인증서** | **에이전트가 직접 처리하되 안전하게** — 아래 상세 |
-| **비가역 액션 (제출/결제/취하)** | 🔒 신뢰 코드 allowlist + `always_confirm` → 성숙도/확신도 무관 강제 인간 승인 |
+| **비가역 액션 (제출/결제/취하)** | 🔒 신뢰 코드 키워드 allowlist → 성숙도/확신도 무관 강제 인간 승인. **Phase 9A 구현:** `click` 도구가 라벨 검사 후 Pydantic AI `ApprovalRequired`→승인 카드→재개 시 본문 재실행(§4 메모). `always_confirm` SOP 프론트매터는 후순위 |
 | **프롬프트 인젝션** | 페이지 콘텐츠 `UNTRUSTED_DATA` 격리 + 숨은 지시 제거 + 교정의 인간 승인 게이트로 SOP 세탁 차단(완전 제거는 불가) |
-| **감사 추적** | 모든 관측·추론·제안 액션·인간 승인(신원+시각)·교정·실행 결과를 **SHA-256 해시체인** append-only, WORM 스토리지 |
+| **감사 추적** | 관측·제안 액션·인간 승인(시각)·실행 결과를 append-only로 기록. **MVP(Phase 9A): 평문 JSONL**(`backend/audit.py`, git 미추적, 요약만·비밀값 비기록). **SHA-256 해시체인 + WORM은 v2** |
 | **PII / PIPA 국외이전** | 전송 전 로컬 리댁션, 데이터 최소화. **결정: zero-data-retention Claude 엔드포인트 + DPA(클라우드 경로) 채택. 온프렘/인-Korea는 보류.** ※ 회사 법무 최종 사인오프 필요 |
-| **도메인/액션 경계** | `*.scourt.go.kr` 호스트 allowlist(주 사이트 `ecfs.scourt.go.kr`, 로그인 등 하위도메인 포함), 레이트 리미터, 항상 보이는 **STOP**(content-script 실행기에서 클릭 직전 마지막 취소) |
+| **도메인/액션 경계** | `*.scourt.go.kr` 호스트 allowlist(주 사이트 `ecfs.scourt.go.kr`, 로그인 등 하위도메인 포함). **Phase 9A 구현:** 백엔드 `safety.domain_allowed`(신뢰 경계, env `ALLOWED_DOMAINS` 설정값화)가 `navigate`를 검사 + 익스텐션 `SCOURT_HOST` 방어심층, `session` 롤링 윈도우 레이트 리미터, 항상 보이는 **STOP**(content-script 실행기에서 클릭 직전 마지막 취소) |
 
 ### 🔐 로그인·공동인증서 — 직접 하되 안전하게
 
