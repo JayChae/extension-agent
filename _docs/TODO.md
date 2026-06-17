@@ -165,6 +165,7 @@
 
 ## ⏭️ MVP 이후 (후순위 — 지금 짜지 않는다) (§13, §14)
 
+- [x] **지각 타이밍: 고정 대기 → 정착(settle) 감지** (§3, §6) — content.js `settleAndObserve`의 고정 350ms를 `MutationObserver` 디바운스(DOM 변화가 `SETTLE_QUIET_MS`=300ms 멈추면 읽음)+하드캡(`SETTLE_MAX_MS`=3000ms 상한, 끝없이 바뀌는 위젯에도 반드시 반환)으로 교체. `perceive`도 정착 경유(`return await settleAndObserve()`) → navigate 후 새 페이지·느린 AJAX 검색결과를 **완료 시점에** 읽음(빠른 화면은 빨리, 느린 화면은 필요한 만큼). "모든 관측은 정착된 관측" 한 규칙으로 통일(단 `extract`는 화면 안 바꾸는 데이터 추출이라 즉시 `observe()` 유지, `navigate`는 페이지 파괴라 정착 못 기다리고 즉시 반환→모델이 다음에 perceive). **부수효과:** 모델이 로딩 중 화면을 polling할 필요가 사라져 무진전 가드(`session._guard_after` 같은 해시 3회 반복) 오중단 위험도 해소. **트레이드오프:** 무한 애니메이션 위젯은 매번 MAX까지 대기(상한 안이라 안전), scourt 그리드가 MAX 초과로 렌더되면 다음 perceive가 즉시 따라잡음(자가치유). `QUIET/MAX`는 scourt 실측 후 튜닝. **검증(자동 달성):** `node --check` 구문 + 정착 로직 시나리오 3종(변화없음→QUIET / 디바운스 리셋 / 무한변화→MAX 상한·중복 resolve 없음)을 가짜 클럭으로 단언 통과 + 백엔드 회귀 44개 그대로 통과(content.js 무관). ⏳ 실제 scourt에서 클릭→AJAX·navigate→새화면 정착 풀루프는 사용자 검토 대기(브라우저 필요). 광범위 관측(`attributes/characterData/subtree`)은 의도적 — 지각이 aria/disabled/텍스트 변화를 실제로 읽으므로 그 정착을 기다림이 맞음(code-review 확인)
 - [ ] 멀티탭/팝업/iframe, cross-origin OOPIF (CDP flat-session) (§14-5)
 - [ ] `chrome.debugger` 신뢰입력 에스컬레이션 (scourt는 합성이벤트 수용이라 드문 폴백) (§4, §15)
 - [ ] 조립식 스킬 추출(`skills/`) + 1~2층 깊이 + DRY 공유 (§8)

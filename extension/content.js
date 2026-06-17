@@ -252,10 +252,33 @@ function doSelect(el, option) {
 // (MV3 content/SW 런타임 분리로 모듈 공유 불가 — 향후 설정값화 시 일원화).
 const SCOURT_HOST = /(^|\.)scourt\.go\.kr$/;
 
-// 짧은 정착 지연 후 새 관측을 반환(AJAX/모달 반영 시간).
+// 화면이 "정착"하면 읽는다 — 고정 대기 대신 DOM 변화가 QUIET 동안 멈출 때까지(MAX 상한 안에서).
+// 페이지가 스스로 "다 됐다"고 알리는 셈: 빠른 화면은 빨리, 느린 AJAX는 기다린다(§3 지각 시점).
+// content script는 isolated world지만 페이지와 DOM을 공유하므로 페이지발 변화를 본다.
+const SETTLE_QUIET_MS = 300; // 이만큼 변화 없으면 정착으로 본다
+const SETTLE_MAX_MS = 3000; // 안전 상한 — 끝없이 바뀌는 위젯에도 반드시 반환(끝나면 다음 perceive가 따라잡음)
+
 function settleAndObserve(extra) {
   return new Promise((resolve) => {
-    setTimeout(() => resolve(observe(extra)), 350);
+    let quiet, cap, observer;
+    const finish = () => {
+      observer.disconnect();
+      clearTimeout(quiet);
+      clearTimeout(cap);
+      resolve(observe(extra));
+    };
+    observer = new MutationObserver(() => {
+      clearTimeout(quiet); // 변화가 올 때마다 리셋
+      quiet = setTimeout(finish, SETTLE_QUIET_MS); // → 변화가 멈춰야 발동
+    });
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true,
+    });
+    quiet = setTimeout(finish, SETTLE_QUIET_MS); // 처음부터 조용하면 QUIET 후 반환
+    cap = setTimeout(finish, SETTLE_MAX_MS); // 안 멈춰도 MAX엔 반드시
   });
 }
 
@@ -265,7 +288,8 @@ async function executeAction(action) {
   try {
     switch (action.kind) {
       case "perceive":
-        return observe();
+        // navigate 후 새 페이지·느린 AJAX를 완료 시점에 읽도록 perceive도 정착 경유(§3).
+        return await settleAndObserve();
       case "click":
         doClick(resolve(action.index));
         return await settleAndObserve({ note: `클릭: [${action.index}]` });
