@@ -4,6 +4,7 @@ const form = document.getElementById("form");
 const input = document.getElementById("text");
 const stopBtn = document.getElementById("stop");
 const teachBtn = document.getElementById("teach");
+const credBtn = document.getElementById("cred");
 const statusEl = document.getElementById("status");
 const dashboardEl = document.getElementById("dashboard");
 
@@ -489,6 +490,75 @@ function renderLessonCard(path, diff) {
 
   log.appendChild(card);
   log.scrollTop = log.scrollHeight;
+}
+
+// ───────────────────────── 🔐 자격증명 등록(§11) ─────────────────────────
+// 비밀값(로그인 ID·비번·인증서 PIN)을 한 번 등록 → 백엔드 금고가 암호화 보관. 값은 로컬 WS로
+// 백엔드까지만 가고 모델·로그엔 안 남는다. 입력칸은 password type(어깨너머 훔쳐보기 방지).
+credBtn.addEventListener("click", () => {
+  if (!document.getElementById("cred-card")) openCredentialCard();
+});
+
+function openCredentialCard() {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.id = "cred-card";
+
+  const head = document.createElement("div");
+  head.className = "head";
+  const q = document.createElement("div");
+  q.className = "q";
+  q.textContent = "🔐 자격증명 등록 — 비밀값은 금고에 암호화되어 보관돼요(AI는 값을 못 봅니다)";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "close";
+  close.textContent = "✕";
+  close.addEventListener("click", () => card.remove());
+  head.appendChild(q);
+  head.appendChild(close);
+  card.appendChild(head);
+
+  const sel = document.createElement("select");
+  for (const [value, text] of [
+    ["cert_pin", "공동인증서 비밀번호(PIN)"],
+    ["login_id", "로그인 ID"],
+    ["login_pw", "로그인 비밀번호"],
+  ]) {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = text;
+    sel.appendChild(o);
+  }
+  card.appendChild(sel);
+
+  const f = document.createElement("form");
+  f.className = "answer";
+  const val = document.createElement("input");
+  val.type = "password";
+  val.placeholder = "값 입력…";
+  val.autocomplete = "off";
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "submit";
+  saveBtn.textContent = "저장";
+  f.appendChild(val);
+  f.appendChild(saveBtn);
+  f.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const value = val.value;
+    if (!value) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      addLine("sys", "(백엔드 연결이 없어 등록하지 못했어요)");
+      return;
+    }
+    ws.send(JSON.stringify({ type: "register_credential", kind: sel.value, value }));
+    val.value = ""; // 화면에 남기지 않는다
+    card.remove();
+  });
+  card.appendChild(f);
+
+  log.appendChild(card);
+  log.scrollTop = log.scrollHeight;
+  val.focus();
 }
 
 connect();

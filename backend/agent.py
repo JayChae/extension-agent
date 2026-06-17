@@ -6,12 +6,15 @@ WS 왕복을 직접 수행하고, 반환한 관측 문자열이 모델이 보는
 
 import os
 from pathlib import Path
+from typing import Literal
 
 from pydantic_ai import Agent, ApprovalRequired, CallDeferred, DeferredToolRequests, RunContext
 from pydantic_ai.models.anthropic import AnthropicModelSettings
 from pydantic_ai.output import ToolOutput
 
+import audit
 import safety
+import vault
 from session import Session
 
 MEMORY_DIR = Path(__file__).resolve().parent.parent / "memory"
@@ -41,6 +44,11 @@ SYSTEM_PROMPT = """\
 [사건검색 도메인 힌트]
 - '사건구분'은 native <select>가 아니라 autocomplete 입력이다 → type으로 값을 넣은 뒤 뜨는 후보를 click.
 - '사건번호'는 끝자리까지 정확히 입력한다.
+
+[로그인·공동인증서 — 비밀값]
+- 로그인 ID·비밀번호·공동인증서 PIN 입력칸에는 절대 type을 쓰지 말고 fill_credential(index, kind)를 써라.
+  비밀값은 금고에만 있고 너는 값을 모른다 — kind(login_id/login_pw/cert_pin)만 고르면 금고가 직접 채운다.
+- 인증서 선택(이름·기관) 자체는 비밀이 아니므로 평소처럼 click으로 고른다.
 
 [완료]
 - 목표(예: 결과 표 도달)가 충족되면 즉시 done(result=...)로 결과를 요약하며 종료한다.
@@ -78,6 +86,11 @@ def render_observation(obs: dict) -> str:
             parts.append("요소:\n" + "\n".join(obs["elements"]))
         if obs.get("tables"):
             parts.append("표:\n" + "\n\n".join(obs["tables"]))
+        if obs.get("dialogs"):  # 네이티브 alert/confirm을 MAIN world 훅이 가로채 자동 처리함(§4)
+            parts.append(
+                "네이티브 다이얼로그(자동 수락됨):\n"
+                + "\n".join(f"- {d.get('kind')}: {d.get('message', '')}" for d in obs["dialogs"])
+            )
         if obs.get("note"):
             parts.append(f"note: {obs['note']}")
         body = "\n".join(parts)
@@ -129,6 +142,23 @@ async def click(ctx: RunContext[Session], index: int) -> str:
 async def type_text(ctx: RunContext[Session], index: int, text: str) -> str:
     """인덱스 [index] 입력칸에 text를 입력한다."""
     return render_observation(await ctx.deps.act({"kind": "type", "index": index, "text": text}))
+
+
+@agent.tool
+async def fill_credential(
+    ctx: RunContext[Session], index: int, kind: Literal["login_id", "login_pw", "cert_pin"]
+) -> str:
+    """로그인 ID·비밀번호·공동인증서 PIN을 금고에서 꺼내 [index] 입력칸에 직접 채운다.
+    너는 값을 보지 못한다 — kind만 고른다(비밀값은 금고에만 있음)(§11)."""
+    secret = vault.get(kind)
+    if secret is None:
+        return f"금고에 '{kind}'이(가) 등록돼 있지 않다 — 사람에게 등록을 요청하라(ask_human)."
+    audit.log("fill_credential", kind=kind, index=index)  # 종류 라벨만 — 값은 기록 안 함
+    # secret 플래그로 content가 관측 note에 입력값을 echo하지 않게 한다(누출 방지). act()는 이미 text를
+    # 로그·모델에 안 싣는다(§3 구조적 블랭킹) → 평문 비밀값 누출 지점 없음.
+    return render_observation(
+        await ctx.deps.act({"kind": "type", "index": index, "text": secret, "secret": True})
+    )
 
 
 @agent.tool

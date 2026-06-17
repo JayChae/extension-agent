@@ -13,6 +13,7 @@ from pydantic_ai import DeferredToolRequests, DeferredToolResults
 import audit
 import memory_store
 import safety
+import vault
 from agent import MODEL, agent, render_observation
 from memory_agent import distill, distill_lesson, verify_run
 from session import CaptchaHandoff, RunHalted, Session, Stopped
@@ -351,6 +352,19 @@ async def ws(websocket: WebSocket):
             elif mtype == "reject_lesson":
                 # 반려 → 레슨 제안 폐기(저장 안 함).
                 session.pending_lesson = None
+
+            elif mtype == "register_credential":
+                # 🔐 사이드패널 '자격증명' 카드 → 금고에 암호화 저장(§11). 값은 로컬 WS로 백엔드까지만
+                # 가고 모델·관측·로그·UI엔 안 남는다(여기서 종류만 감사 로그에 남김).
+                kind = msg.get("kind")
+                value = msg.get("value") or ""
+                try:
+                    await asyncio.to_thread(vault.put, kind, value)
+                except ValueError as e:
+                    await websocket.send_json({"type": "backend_echo", "text": f"자격증명 등록 실패: {e}"})
+                    continue
+                audit.log("credential_registered", kind=kind)  # 종류만 — 값은 절대 기록 안 함
+                await websocket.send_json({"type": "backend_echo", "text": f"자격증명 등록됨: {kind}"})
 
             elif mtype == "stop":
                 session.stopped = True
