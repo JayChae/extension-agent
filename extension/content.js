@@ -282,6 +282,66 @@ function settleAndObserve(extra) {
   });
 }
 
+// ───────────────────────── 문서 열람(PDF) ─────────────────────────
+// 문서 링크를 페이지 출처에서 fetch → 로그인·인증서 세션 쿠키가 자동으로 실린다(백엔드 직접 fetch는
+// 그 쿠키가 없어 불가). 바이트는 base64로 백엔드에 넘기고 파싱은 백엔드가 한다("content 얇게" §3).
+const MAX_DOC_BYTES = 10 * 1024 * 1024; // 10MB 상한 — 백엔드도 같은 상한
+
+// scourt allowlist 호스트인지(파싱 실패=거부). navigate 케이스와 같은 SCOURT_HOST 경계를 쓴다.
+function hostAllowed(u) {
+  try {
+    return SCOURT_HOST.test(new URL(u).hostname);
+  } catch {
+    return false;
+  }
+}
+
+async function readDocument(el) {
+  const anchor = el.closest && el.closest("a");
+  const url = el.href || (anchor && anchor.href) || "";
+  if (!url) return { ok: false, error: "직접 링크가 아니에요 — 새 탭/JS 다운로드 문서는 후순위입니다." };
+  if (!hostAllowed(url)) return { ok: false, error: `허용 도메인 아님(또는 잘못된 URL): ${url}` };
+
+  let resp;
+  try {
+    resp = await fetch(url, { credentials: "include" });
+  } catch (e) {
+    return { ok: false, error: `문서 받기 실패: ${e.message}` };
+  }
+  if (!resp.ok) return { ok: false, error: `문서 받기 실패: HTTP ${resp.status}` };
+
+  // 리다이렉트가 허용 도메인을 벗어났는지 최종 URL로 재검사 — in-domain 링크가 off-domain으로
+  // 302되면 쿠키 유출·공격자 바이트를 신뢰 문서로 파싱하게 된다. source_url도 최종 URL로 보고한다.
+  if (!hostAllowed(resp.url)) {
+    return { ok: false, error: `리다이렉트가 허용 도메인을 벗어남: ${resp.url}` };
+  }
+
+  const buf = await resp.arrayBuffer();
+  if (buf.byteLength > MAX_DOC_BYTES) {
+    return { ok: false, error: `문서가 너무 큼(${buf.byteLength} bytes, 상한 ${MAX_DOC_BYTES})` };
+  }
+  return {
+    ok: true,
+    page: { url: location.href, title: document.title },
+    document: {
+      source_url: resp.url,
+      content_type: resp.headers.get("content-type") || "",
+      b64: bytesToBase64(new Uint8Array(buf)),
+    },
+    note: "문서 받음",
+  };
+}
+
+// 큰 바이트 배열을 청크로 base64 인코딩(btoa는 한 번에 큰 문자열에서 스택이 터질 수 있음).
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 async function executeAction(action) {
   // 모든 액션은 실행 직전 STOP 검사(§11 "클릭 직전 마지막 취소").
   if (stopped) return { ok: false, note: "STOP — 취소됨" };
@@ -320,6 +380,8 @@ async function executeAction(action) {
         return await settleAndObserve({ note: `스크롤: ${action.dir || "down"}` });
       case "extract":
         return observe({ note: `추출: ${action.query || ""}` });
+      case "read_document":
+        return await readDocument(resolve(action.index));
       default:
         return { ok: false, error: `알 수 없는 액션: ${action.kind}` };
     }

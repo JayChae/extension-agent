@@ -149,7 +149,7 @@ class Session:
             raise RunHalted("무진전: 같은 동작 반복")
         self.last_tool_sig = sig
 
-    def _guard_after(self, obs: dict) -> None:
+    def _guard_after(self, obs: dict, track_screen: bool = True) -> None:
         # CAPTCHA/안티봇 감지(§4) — 풀거나 우회하지 않고 사람에게 핸드오프. ok 여부보다 먼저 본다.
         if obs.get("captcha"):
             raise CaptchaHandoff("CAPTCHA 감지 — 자동 진행을 멈춥니다. 사람이 직접 처리해 주세요")
@@ -159,6 +159,8 @@ class Session:
                 raise RunHalted("연속 실패")
             return  # 실패 관측은 무진전 해시 집계에서 제외
         self.fails = 0
+        if not track_screen:
+            return  # 화면이 아닌 관측(read_document=문서 내용)은 무진전 해시 집계에서 제외
         h = _obs_hash(obs)
         self.recent_hashes.append(h)
         if self.recent_hashes.count(h) >= NO_PROGRESS_REPEAT:
@@ -180,8 +182,13 @@ class Session:
             title=page.get("title"),
             n_elements=len(obs.get("elements") or []),
         )
-        self._guard_after(obs)
-        # 최종 화면 = 마지막 관측(성공/실패 무관). 마지막 액션이 실패로 끝나면 verify가 그 실패 화면을
+        # read_document 관측은 "화면"이 아니라 문서 내용이다 → 화면 상태 추적에서 제외한다.
+        # 안 그러면 ① 직후 click의 크리티컬 게이트가 빈 elements로 라벨을 못 읽어 승인을 건너뛰고
+        # ② 무진전 해시·③ verify 최종화면 판정이 문서 내용에 오염된다(§4·§10·§14-3).
+        is_screen = action.get("kind") != "read_document"
+        self._guard_after(obs, track_screen=is_screen)
+        # 최종 화면 = 마지막 화면 관측(성공/실패 무관). 마지막 액션이 실패로 끝나면 verify가 그 실패 화면을
         # 봐야 한다 — 옛 성공 화면을 보면 실패한 런을 성공으로 졸업시킨다(§14-3 조용한 실패 방지)(§10).
-        self.last_observation = obs
+        if is_screen:
+            self.last_observation = obs
         return obs

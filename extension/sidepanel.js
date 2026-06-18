@@ -103,6 +103,7 @@ function formatObservation(obs) {
   if (!obs.ok) return "✖ " + (obs.error || obs.note || "실패");
   const parts = [];
   if (obs.note) parts.push(obs.note);
+  if (obs.document) parts.push(`문서 받음 (${Math.round((obs.document.b64 || "").length / 1024)} KB)`);
   if (obs.elements) parts.push(`요소 ${obs.elements.length}개:\n` + obs.elements.join("\n"));
   if (obs.tables && obs.tables.length) parts.push(`표 ${obs.tables.length}개:\n` + obs.tables.join("\n\n"));
   return parts.join("\n");

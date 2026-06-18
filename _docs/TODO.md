@@ -13,7 +13,9 @@
 ---
 
 ## 📍 현재 위치
-> **Phase 9B(🔒 자격증명 금고 + 네이티브 alert/confirm 훅) 구현·자동검증 완료 — 횡단 안전 최소선 전부 켜짐 → MVP 완료 정의 충족(아래 🎯).** 9B=① 자격증명 금고 `backend/vault.py`(Fernet 암호화, 마스터키 자동 생성·재사용=설정 불필요(env `VAULT_KEY` 있으면 우선), kind 고정집합) + 사이드패널 '자격증명' 카드 1회 등록(`register_credential` WS → `vault.put`, 값은 로컬 WS로 백엔드까지만; 사용자 확정: 비전문가 편의 위해 터미널 대신 카드) + `fill_credential(index,kind)` 도구(모델은 종류만, harness가 꺼내 `secret:true` `type`으로 직접 입력 — 평문 비밀값이 모델·로그·UI 어디에도 안 남음) ② 네이티브 다이얼로그 `extension/main_hook.js`(MAIN world, document_start)가 `alert/confirm/prompt` 가로채 자동처리 + CustomEvent로 ISOLATED content에 전달 → 관측 `dialogs`로 모델에 노출(content 얇게 원칙의 유일한 MAIN 예외). 의존성 `cryptography` 추가. 가짜 모델+임시 금고로 자동검증(전체 44개 통과, `backend/tests/test_vault.py`). ⏳ 실제 scourt에서 인증서 PIN 입력·다이얼로그 가로채기는 사용자 검토 대기.
+> **Phase 10(문서 열람 — PDF 다운로드→읽기→근거로 행동) 구현·자동검증 완료.** MVP(9B) 이후 신규 능력: 에이전트가 `read_document(index)`로 문서 링크(PDF)를 받아 텍스트로 읽고 그 내용을 근거로 다음 행동을 정한다. 인증 문제(전자소송 PDF는 로그인·인증서 세션 쿠키 필요 — 백엔드엔 그 쿠키가 없음, `chrome.downloads`는 바이트 미제공)를 **content가 페이지 출처에서 `fetch`**(쿠키 자동)→base64→백엔드 pymupdf 추출→`<UNTRUSTED_PAGE_DATA>` 펜스 노출로 해결. 파싱은 백엔드(content 얇게 §3), 모델은 인덱스만 지정(§4). 코드리뷰 반영: ① read_document 관측이 화면 상태(`last_observation`)·무진전 해시를 오염 안 하게 분리 → 직후 제출 클릭의 크리티컬 게이트·졸업 판정 보존 ② 리다이렉트 최종 URL 도메인 재검사(쿠키 유출·신뢰 위장 차단) ③ %PDF 매직바이트 검사(세션 만료 HTML 200 거짓 추출 방지) ④ 디코드 전 크기 가드. 의존성 `pymupdf` 추가. 가짜 모델+가짜 브라우저+즉석 PDF로 자동검증(전체 54개 통과, `backend/tests/test_documents.py` 10개). 범위: PDF만(HWP·스캔/OCR·새탭뷰어 후순위). ⏳ 실제 scourt에서 로그인·인증서 후 라이브 풀루프는 사용자 검토 대기.
+>
+> **(이전) Phase 9B(🔒 자격증명 금고 + 네이티브 alert/confirm 훅) 구현·자동검증 완료 — 횡단 안전 최소선 전부 켜짐 → MVP 완료 정의 충족(아래 🎯).** 9B=① 자격증명 금고 `backend/vault.py`(Fernet 암호화, 마스터키 자동 생성·재사용=설정 불필요(env `VAULT_KEY` 있으면 우선), kind 고정집합) + 사이드패널 '자격증명' 카드 1회 등록(`register_credential` WS → `vault.put`, 값은 로컬 WS로 백엔드까지만; 사용자 확정: 비전문가 편의 위해 터미널 대신 카드) + `fill_credential(index,kind)` 도구(모델은 종류만, harness가 꺼내 `secret:true` `type`으로 직접 입력 — 평문 비밀값이 모델·로그·UI 어디에도 안 남음) ② 네이티브 다이얼로그 `extension/main_hook.js`(MAIN world, document_start)가 `alert/confirm/prompt` 가로채 자동처리 + CustomEvent로 ISOLATED content에 전달 → 관측 `dialogs`로 모델에 노출(content 얇게 원칙의 유일한 MAIN 예외). 의존성 `cryptography` 추가. 가짜 모델+임시 금고로 자동검증(전체 44개 통과, `backend/tests/test_vault.py`). ⏳ 실제 scourt에서 인증서 PIN 입력·다이얼로그 가로채기는 사용자 검토 대기.
 >
 > **(이전) Phase 9A(🔒 횡단 안전 게이트 핵심) 구현·자동검증 완료.** 안전 섹션을 크기 차이로 두 단계로 분할(사용자 확정): 9A=결정적 harness 안전 레일 4개(① 크리티컬 액션 하드 게이트=제출류 라벨이면 성숙도 무관 강제 승인, Pydantic AI `ApprovalRequired`로 `click` 도구가 멈추고 승인 카드→`action_approval` 무상태 재개 ② 도메인 allowlist 백엔드(`safety.domain_allowed`, env 설정값화)+레이트 리미터(`session` 롤링 윈도우) ③ CAPTCHA 감지→`CaptchaHandoff` 핸드오프 ④ 평문 감사 로그 `audit.py`). 신규 `backend/safety.py`·`backend/audit.py`, 가짜 모델+가짜 브라우저로 자동검증(7개 추가, 전체 34개 통과).
 >
@@ -153,6 +155,21 @@
 **✅ 검증(9A 자동 달성):** 제출 버튼 클릭 → 승인 카드(성숙도 무관) → 승인 시 실제 클릭/거부 시 통보, 도메인 거부, 레이트 리밋 정지, CAPTCHA 핸드오프, 감사 로그(요약만·입력값 미기록)를 가짜 모델+가짜 브라우저로 자동검증(7개, `backend/tests/test_safety.py`; 전체 34개 통과). ⏳ 실제 scourt 풀루프는 사용자 검토 대기.
 
 **✅ 검증(9B 자동 달성):** 금고 암호화 라운드트립·at-rest 암호화(평문 부재)·미등록/허용외kind/키없음 안전폴백, `fill_credential` 풀루프(모델은 `kind`만 보냄 → 금고가 꺼낸 비밀값을 담은 `type` command 단언 + 감사 로그에 평문 비밀값 부재·`fill_credential` 이벤트는 종류 라벨만), 네이티브 다이얼로그의 관측 노출을 가짜 모델·임시 금고로 자동검증(7개, `backend/tests/test_vault.py`; 전체 41개 통과). ⏳ 실제 scourt에서 ① alert/confirm 가로채기·자동수락 ② 공동인증서 PIN `fill_credential` 입력은 사용자 검토 대기(브라우저 필요).
+
+---
+
+## Phase 10 — 📄 문서를 받아 읽고 그걸 근거로 행동한다 (PDF 열람) (§3, §4, §5)
+
+> MVP 이후 신규 능력. 전자소송 실무는 송달문서·판결문 PDF를 받아 그 내용을 보고 다음 행동을 정해야 한다.
+> 기존엔 ① 파일 다운로드도 ② PDF 읽기도 없었다. 이 Phase가 그 빈칸을 채운다.
+
+- [x] **도구 `read_document(index)`** (§5) — 모델은 신뢰 화면 요소(인덱스)만 가리킨다(URL 생성 금지 §4). 읽기 전용이라 크리티컬 게이트 없음(`perceive`/`extract`와 동급)
+- [x] **content가 페이지 출처에서 fetch** (§3) — `fetch(url, {credentials:'include'})`로 로그인·인증서 세션 쿠키 자동 탑재(백엔드 직접 fetch는 그 쿠키가 없어 불가, `chrome.downloads`는 디스크 경로만 주고 바이트 미제공). 바이트→base64→기존 1-command-1-observation WS 채널. manifest 새 권한·SW 변경·새 카드 불필요(`host_permissions`가 이미 content fetch 허용)
+- [x] **백엔드 `documents.extract_into`** — pymupdf로 텍스트 추출(파싱은 백엔드, content 얇게 §3). 페이지 상한 30·텍스트 상한 12k(초과 시 truncated). 빈/스캔 PDF는 "텍스트 없음(OCR 미지원)" 안내(환각 금지). 추출 텍스트는 `render_observation`이 `<UNTRUSTED_PAGE_DATA>` 펜스에 노출
+- [x] **안전(코드리뷰 반영)** — ① read_document 관측을 화면 상태에서 분리(`session.act` `is_screen`): `last_observation`·무진전 해시 미오염 → 직후 제출 클릭의 크리티컬 게이트·졸업 판정 보존 ② 리다이렉트 최종 URL 도메인 재검사(content)+`source_url`을 최종 URL로 보고 → 백엔드 `safety.domain_allowed` 재검증이 실효(쿠키 유출·신뢰 위장 차단) ③ `%PDF` 매직바이트 검사(세션 만료 HTML 200 거짓 추출 방지) ④ 디코드 전 b64 길이 가드(메모리 보호) ⑤ 감사 로그엔 char 수만, 내용 미기록
+- [x] 의존성 `pymupdf` 추가. 범위: **PDF만**(HWP·스캔/OCR·새탭뷰어 후순위, 사용자 확정)
+
+**✅ 검증(자동 달성):** 즉석 생성 PDF로 ① 풀루프(read_document→PDF 텍스트가 펜스로 들어옴→그 근거로 다음 행동→done) ② 도메인 거부 ③ 빈/스캔 PDF note ④ 텍스트·크기 상한 ⑤ 비-PDF 거부 ⑥ 감사 로그 내용 부재 ⑦ **read_document가 직후 제출 클릭의 크리티컬 게이트를 오염 안 함**을 가짜 모델·가짜 브라우저로 자동검증(10개, `backend/tests/test_documents.py`; 전체 54개 통과). `node --check` 구문 통과. ⏳ 실제 scourt에서 로그인·인증서 후 문서 링크 받아 텍스트 근거로 행동하는 라이브 풀루프는 사용자 검토 대기(브라우저·크레딧 필요).
 
 ---
 
