@@ -13,7 +13,11 @@
 ---
 
 ## 📍 현재 위치
-> **Phase 10(문서 열람 — PDF 다운로드→읽기→근거로 행동) 구현·자동검증 완료.** MVP(9B) 이후 신규 능력: 에이전트가 `read_document(index)`로 문서 링크(PDF)를 받아 텍스트로 읽고 그 내용을 근거로 다음 행동을 정한다. 인증 문제(전자소송 PDF는 로그인·인증서 세션 쿠키 필요 — 백엔드엔 그 쿠키가 없음, `chrome.downloads`는 바이트 미제공)를 **content가 페이지 출처에서 `fetch`**(쿠키 자동)→base64→백엔드 pymupdf 추출→`<UNTRUSTED_PAGE_DATA>` 펜스 노출로 해결. 파싱은 백엔드(content 얇게 §3), 모델은 인덱스만 지정(§4). 코드리뷰 반영: ① read_document 관측이 화면 상태(`last_observation`)·무진전 해시를 오염 안 하게 분리 → 직후 제출 클릭의 크리티컬 게이트·졸업 판정 보존 ② 리다이렉트 최종 URL 도메인 재검사(쿠키 유출·신뢰 위장 차단) ③ %PDF 매직바이트 검사(세션 만료 HTML 200 거짓 추출 방지) ④ 디코드 전 크기 가드. 의존성 `pymupdf` 추가. 가짜 모델+가짜 브라우저+즉석 PDF로 자동검증(전체 54개 통과, `backend/tests/test_documents.py` 10개). 범위: PDF만(HWP·스캔/OCR·새탭뷰어 후순위). ⏳ 실제 scourt에서 로그인·인증서 후 라이브 풀루프는 사용자 검토 대기.
+> **다음 대기: MVP 이후 백로그(아래 ⏭️ 섹션).** MVP 핵심(P5~P8)+횡단 안전(9A/9B)+문서 열람(P10)·강화(P11)까지 자동검증 완료. 남은 건 전부 후순위(멀티탭/OOPIF·신뢰입력 에스컬레이션·조립식 스킬·벡터 RAG·팀 2티어·해시체인 감사·상위 졸업 레벨·durable 백엔드·SLO·관측성)와 (B) 비-href 문서→ask_human(scourt 실측 후). 다음 착수 항목은 사용자와 정한다.
+>
+> **(완료) Phase 11(문서 읽기 강화 — 펜스 보안 패치 + opendataloader 추출 + 페이지 범위) 구현·자동검증 완료.** Phase 10 비판적 리뷰의 진짜 결함 1(펜스 탈출 인젝션)+설계 개선 2(추출 엔진·결론 보존)를 마감: ① 🔴 추출 텍스트의 `</?UNTRUSTED_PAGE_DATA>` 펜스 토큰을 백엔드 `documents.py`가 제거(PDF는 content.js stripMarkers를 안 거치는 경로 → 펜스 만드는 백엔드가 책임) ② 추출 엔진 pymupdf→**opendataloader-pdf**(Java JAR subprocess) 교체로 표·다단 구조 보존(`format`=markdown 기본/html), `content-safety` 기본 ON으로 숨은텍스트 필터(§3 정렬) ③ `pages="1-3"` 인자로 결론(문서 끝) 페이지를 넘겨 읽기 + truncated 시 "뒷부분 생략됨" 분명히 표시. `pymupdf`는 테스트 PDF 생성용 dev 의존성으로 강등. 코드리뷰 반영: 출력 파일을 `*.{md,html}` glob으로 집어 명명 변경에도 빈 텍스트(거짓 "스캔 PDF")로 안 무너지게. 가짜 모델·즉석 PDF로 자동검증(`test_documents.py` 17개, 전체 61개 통과). 범위: **직접 링크(href)만 유지** — 새 탭/뷰어/JS/blob=(B)는 다음 Phase로 미룸(사용자 확정). ⏳ 실제 scourt 라이브 풀루프(로그인·인증서 후 표 든 문서)+배포 JVM 동봉은 사용자 검토 대기.
+>
+> **(이전) Phase 10(문서 열람 — PDF 다운로드→읽기→근거로 행동) 구현·자동검증 완료.** MVP(9B) 이후 신규 능력: 에이전트가 `read_document(index)`로 문서 링크(PDF)를 받아 텍스트로 읽고 그 내용을 근거로 다음 행동을 정한다. 인증 문제(전자소송 PDF는 로그인·인증서 세션 쿠키 필요 — 백엔드엔 그 쿠키가 없음, `chrome.downloads`는 바이트 미제공)를 **content가 페이지 출처에서 `fetch`**(쿠키 자동)→base64→백엔드 pymupdf 추출→`<UNTRUSTED_PAGE_DATA>` 펜스 노출로 해결. 파싱은 백엔드(content 얇게 §3), 모델은 인덱스만 지정(§4). 코드리뷰 반영: ① read_document 관측이 화면 상태(`last_observation`)·무진전 해시를 오염 안 하게 분리 → 직후 제출 클릭의 크리티컬 게이트·졸업 판정 보존 ② 리다이렉트 최종 URL 도메인 재검사(쿠키 유출·신뢰 위장 차단) ③ %PDF 매직바이트 검사(세션 만료 HTML 200 거짓 추출 방지) ④ 디코드 전 크기 가드. 의존성 `pymupdf` 추가. 가짜 모델+가짜 브라우저+즉석 PDF로 자동검증(전체 54개 통과, `backend/tests/test_documents.py` 10개). 범위: PDF만(HWP·스캔/OCR·새탭뷰어 후순위). ⏳ 실제 scourt에서 로그인·인증서 후 라이브 풀루프는 사용자 검토 대기.
 >
 > **(이전) Phase 9B(🔒 자격증명 금고 + 네이티브 alert/confirm 훅) 구현·자동검증 완료 — 횡단 안전 최소선 전부 켜짐 → MVP 완료 정의 충족(아래 🎯).** 9B=① 자격증명 금고 `backend/vault.py`(Fernet 암호화, 마스터키 자동 생성·재사용=설정 불필요(env `VAULT_KEY` 있으면 우선), kind 고정집합) + 사이드패널 '자격증명' 카드 1회 등록(`register_credential` WS → `vault.put`, 값은 로컬 WS로 백엔드까지만; 사용자 확정: 비전문가 편의 위해 터미널 대신 카드) + `fill_credential(index,kind)` 도구(모델은 종류만, harness가 꺼내 `secret:true` `type`으로 직접 입력 — 평문 비밀값이 모델·로그·UI 어디에도 안 남음) ② 네이티브 다이얼로그 `extension/main_hook.js`(MAIN world, document_start)가 `alert/confirm/prompt` 가로채 자동처리 + CustomEvent로 ISOLATED content에 전달 → 관측 `dialogs`로 모델에 노출(content 얇게 원칙의 유일한 MAIN 예외). 의존성 `cryptography` 추가. 가짜 모델+임시 금고로 자동검증(전체 44개 통과, `backend/tests/test_vault.py`). ⏳ 실제 scourt에서 인증서 PIN 입력·다이얼로그 가로채기는 사용자 검토 대기.
 >
@@ -170,6 +174,23 @@
 - [x] 의존성 `pymupdf` 추가. 범위: **PDF만**(HWP·스캔/OCR·새탭뷰어 후순위, 사용자 확정)
 
 **✅ 검증(자동 달성):** 즉석 생성 PDF로 ① 풀루프(read_document→PDF 텍스트가 펜스로 들어옴→그 근거로 다음 행동→done) ② 도메인 거부 ③ 빈/스캔 PDF note ④ 텍스트·크기 상한 ⑤ 비-PDF 거부 ⑥ 감사 로그 내용 부재 ⑦ **read_document가 직후 제출 클릭의 크리티컬 게이트를 오염 안 함**을 가짜 모델·가짜 브라우저로 자동검증(10개, `backend/tests/test_documents.py`; 전체 54개 통과). `node --check` 구문 통과. ⏳ 실제 scourt에서 로그인·인증서 후 문서 링크 받아 텍스트 근거로 행동하는 라이브 풀루프는 사용자 검토 대기(브라우저·크레딧 필요).
+
+---
+
+## Phase 11 — 📄 문서 읽기 강화 (펜스 보안 패치 + opendataloader 추출 + 페이지 범위) (§3, §5)
+
+> Phase 10 후속. 비판적 리뷰 결과 **진짜 결함 1 + 설계 개선 2**로 스코프 확정(사용자 확정).
+> **직접 링크(href)만 지원은 유지** — 새 탭/뷰어/JS다운로드/blob 문서=(B)는 별도 Phase로 미룸(scourt 실측 후 결정).
+> ⚠️ 코드 짜기 전 [opendataloader 옵션](https://pypi.org/project/opendataloader-pdf/) 확인([principle.md](../.claude/rules/principle.md)).
+
+- [x] 🔴 **펜스 탈출 인젝션 차단 (보안, ⛔ 머지 전 필수)** — 추출 텍스트를 `<UNTRUSTED_PAGE_DATA>` 펜스에 넣기 전 **백엔드에서 `</?UNTRUSTED_PAGE_DATA>` 마커 제거**(`documents.py` `_FENCE`, content.js와 동일 정규식). 근거: PDF 텍스트는 content.js `stripMarkers`를 **안 거친다**(content는 바이트만 base64로 넘기고 추출은 백엔드) → 악성 PDF 본문에 닫는 토큰을 박으면 펜스를 깨고 모델에 지시 주입 가능. [agent.py:80](../backend/agent.py#L80) 주석의 "content가 이미 stripMarkers" 가정이 **문서 경로엔 거짓**이었음 → 주석도 갱신. 펜스를 만드는 쪽(백엔드)이 토큰을 책임진다. **닫는 토큰 심은 악성 PDF 테스트(T10)** = 출력 펜스 1쌍 단언으로 추가
+- [x] **추출 엔진 교체: pymupdf 평문 → opendataloader (마크다운 기본 + HTML 옵션)** (§3) — 도구 시그니처 `read_document(index, format="markdown", pages="")`, 허용값 화이트리스트 `{markdown, html}`(그 외 거부). 근거: 평문 `get_text()`는 표·다단을 뭉개 모델이 칸을 오매칭(법률 문서=표 구조 핵심, 비가역 행동에 직결). 실측: `format="markdown"`→파이프 표, `format="html"`→`<table>` 보존 확인. opendataloader 선택 이유: ① 표 구조 보존 ② **markdown·html 둘 다 출력** ③ `content-safety` **기본 ON**(숨은텍스트·off-page·tiny 필터, §3 정렬=보너스). **통합:** opendataloader=**Java JAR subprocess**(`convert()`는 반환값 없이 `output_dir`에 파일 작성, 바이트/스트림 API 없음) → 임시폴더에 **ASCII 고정명 `doc.pdf`** 로 쓰고 변환 후 출력 디렉터리를 `*.{md,html}` glob으로 집어 읽고 `TemporaryDirectory`로 자동정리(한글 경로 우회 춤 회피, 명명 변경에도 빈 텍스트로 안 무너짐). 페이지 수는 `markdown_page_separator`/`html_page_separator`(=`\f`) 카운트로 산출 후 본문에서 제거. `sanitize`(이메일/전화/카드/URL 치환)는 **끔**(읽어 입력할 사건번호 등 손상 방지), `password`는 세션쿠키 인증이라 미사용. `markdown-with-html`은 후순위(평문 markdown 파이프 표로 충분)
+- [x] **의존성·실행환경** — `opendataloader-pdf>=0.1`(설치 2.4.7) 추가, 프로덕션 `pymupdf`(fitz) 제거 → 테스트 PDF 생성용 **dev 의존성으로 강등**(`documents.py`에서 `import fitz` 제거). **Java 런타임 필요**(로컬 OpenJDK 17 확인됨; 배포 이미지에 JVM 동봉 필요 — 메모). 호출당 JVM 콜드스타트 지연은 MVP 수용(추후 병목이면 최적화)
+- [x] **뒤(결론) 보존: 페이지 범위 인자** (§5) — `read_document(index, pages="1-3")`(opendataloader `pages` 인자 그대로, `[\d,\s-]+` 화이트리스트) → 모델이 필요한 쪽을 넘겨 읽음(실측: `pages="2-3"`→해당 쪽만). `MAX_CHARS` 앞-자르기는 백스톱 유지하되, 잘릴 때 render 헤더에 **"뒷부분 생략됨, pages 인자로 뒤쪽을 다시 읽어라"** 로 분명히 표시. 근거: 판결·결정의 주문·결론은 문서 끝 → 앞 12k자만 주면 결론을 놓침
+- [ ] (⏭️ **다음 Phase로 미룸 — 사용자 확정**) **(B) 문서 실패 → `ask_human` 유도** — href 아님(새 탭/뷰어/JS/blob)을 만나면 [content.js:302](../extension/content.js#L302) "후순위입니다"로 끝내지 말고 모델이 `ask_human`("이 문서는 직접 못 읽어요, 사람이 봐주세요")으로 잇게. 안 넣으면 모델이 거기서 헛돌 위험. scourt 실측에서 실제 비-href 문서가 어떤 형태로 나오는지 본 뒤 별도 Phase로 처리
+- [x] **문서 갱신** — [architecture.md](architecture.md) §3(추출=opendataloader markdown/html·펜스 토큰 백엔드 strip)·§5(도구표 `read_document(index, format, pages)`) 갱신 완료
+
+**✅ 검증(자동 달성):** ⛔ ① 닫는 토큰 심은 PDF → 출력 펜스 **1쌍만**(탈출 불가) 단언 통과(T10) ② opendataloader 경로: 표 든 PDF → markdown 파이프 표(T11)/`format="html"` → `<table>`로 추출 + 임시폴더 정리(`TemporaryDirectory` spy로 잔여 부재 단언) ③ 페이지 범위: `pages="2-3"` → 해당 쪽만(T12), 형식·페이지 화이트리스트 거부(T13) ④ **기존 Phase 10 안전 회귀 그대로 통과**(도메인 거부·`%PDF` 매직·비PDF·크기·감사 무내용·read_document가 직후 제출 클릭 크리티컬 게이트 미오염). 가짜 모델·즉석 PDF로 자동검증(`backend/tests/test_documents.py` 17개, 전체 61개 통과). `node --check`·`ruff` 통과. ⏳ 실제 scourt에서 로그인·인증서 후 표 든 문서 라이브 풀루프는 사용자 검토 대기(브라우저·크레딧·배포 JVM 필요)
 
 ---
 
