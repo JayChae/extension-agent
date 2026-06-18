@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn[standard]>=0.49.0",
     "pyyaml>=6.0",
     "cryptography>=43",
+    "pymupdf>=1.24",
 ]
 
 [dependency-groups]

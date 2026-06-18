@@ -13,6 +13,7 @@ from pydantic_ai.models.anthropic import AnthropicModelSettings
 from pydantic_ai.output import ToolOutput
 
 import audit
+import documents
 import safety
 import vault
 from session import Session
@@ -40,6 +41,7 @@ SYSTEM_PROMPT = """\
 - 같은 동작을 무의미하게 반복하지 마라(헛돎).
 - 확신이 안 서거나 분기 판단(예: 결과 0건/여러 건, 지원 vs 본원)이 필요하면 추측하지 말고
   ask_human으로 사수에게 물어라.
+- 문서(PDF) 링크의 내용을 봐야 하면 read_document(index)로 받아 읽고, 그 내용을 근거로 다음 동작을 정한다.
 
 [사건검색 도메인 힌트]
 - '사건구분'은 native <select>가 아니라 autocomplete 입력이다 → type으로 값을 넣은 뒤 뜨는 후보를 click.
@@ -86,6 +88,12 @@ def render_observation(obs: dict) -> str:
             parts.append("요소:\n" + "\n".join(obs["elements"]))
         if obs.get("tables"):
             parts.append("표:\n" + "\n\n".join(obs["tables"]))
+        if obs.get("document"):  # read_document가 받아온 PDF 텍스트 — 페이지발 데이터라 펜스 안에 옴
+            d = obs["document"]
+            head = f"문서(PDF) {d.get('pages', '?')}쪽"
+            if d.get("truncated"):
+                head += " (분량 초과로 일부만 잘림)"
+            parts.append(f"{head}:\n{d.get('text', '')}")
         if obs.get("dialogs"):  # 네이티브 alert/confirm을 MAIN world 훅이 가로채 자동 처리함(§4)
             parts.append(
                 "네이티브 다이얼로그(자동 수락됨):\n"
@@ -187,6 +195,14 @@ async def scroll(ctx: RunContext[Session], dir: str) -> str:
 async def extract(ctx: RunContext[Session], query: str) -> str:
     """query에 맞는 데이터(표 등)를 현재 화면에서 추출한다."""
     return render_observation(await ctx.deps.act({"kind": "extract", "query": query}))
+
+
+@agent.tool
+async def read_document(ctx: RunContext[Session], index: int) -> str:
+    """인덱스 [index]의 문서 링크(PDF)를 내려받아 그 텍스트를 읽는다.
+    내용을 본 뒤 그걸 근거로 다음 행동을 결정하라(예: 읽은 값을 입력·검색)."""
+    obs = await ctx.deps.act({"kind": "read_document", "index": index})
+    return render_observation(documents.extract_into(obs))
 
 
 @agent.tool_plain

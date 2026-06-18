@@ -143,6 +143,7 @@
 | `perceive()` | 화면을 바꾸지 않고 인덱스 요소 목록만 다시 읽기(첫 행동·navigate 직후 필수). *Phase 4 구현 시 추가* — 계약상 1 command⇒1 observation이라 첫 관측·재독 채널이 필요 |
 | `click(index)` `type(index, text)` `select(index, opt)` | 인덱스 요소 조작 |
 | `navigate(url)` `scroll(dir)` `extract(query)` | 이동·스크롤·데이터 추출 |
+| `read_document(index)` | 인덱스 문서 링크(PDF)를 받아 **텍스트로 읽기**(그 내용 근거로 다음 행동). *Phase 10 구현* — content가 페이지 출처에서 `fetch`(세션 쿠키 자동)→base64→백엔드가 pymupdf로 텍스트 추출→`<UNTRUSTED_PAGE_DATA>` 펜스로 노출. 읽기 전용이라 화면 상태(`last_observation`)·무진전 해시 미오염(§4 메모) |
 | `see_screen()` | (옵션) DOM만으로 모호할 때만 스크린샷 |
 | `read_sop(path)` | 업무 SOP·재사용 스킬을 *필요할 때* 자가 로드(지연 로딩, 섹션 8) |
 | `search_memory(query)` | 레슨·gotchas·과거 케이스 벡터 검색 |
