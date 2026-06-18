@@ -77,7 +77,8 @@ else:
 def render_observation(obs: dict) -> str:
     """관측을 모델 입력 문자열로 만든다. 신뢰불가 페이지 부분을 펜스로 감싼다(§3).
 
-    content.js가 이미 stripMarkers로 위조 마커를 제거했으므로, 안쪽 닫는 토큰은 페이지가 못 끼워넣는다.
+    elements/tables/dialogs는 content.js가, 문서(PDF) 텍스트는 documents.py가 펜스 토큰(stripMarkers와
+    동일)을 제거한다 — 여기로 오는 모든 입력은 마커가 제거된 상태라 페이지가 닫는 토큰을 못 끼워넣는다.
     """
     if not obs.get("ok"):
         body = obs.get("error") or obs.get("note") or "실패"
@@ -92,7 +93,7 @@ def render_observation(obs: dict) -> str:
             d = obs["document"]
             head = f"문서(PDF) {d.get('pages', '?')}쪽"
             if d.get("truncated"):
-                head += " (분량 초과로 일부만 잘림)"
+                head += " (분량 초과 — 뒷부분 생략됨, pages 인자로 뒤쪽을 다시 읽어라)"
             parts.append(f"{head}:\n{d.get('text', '')}")
         if obs.get("dialogs"):  # 네이티브 alert/confirm을 MAIN world 훅이 가로채 자동 처리함(§4)
             parts.append(
@@ -198,11 +199,15 @@ async def extract(ctx: RunContext[Session], query: str) -> str:
 
 
 @agent.tool
-async def read_document(ctx: RunContext[Session], index: int) -> str:
+async def read_document(
+    ctx: RunContext[Session], index: int, format: str = "markdown", pages: str = ""
+) -> str:
     """인덱스 [index]의 문서 링크(PDF)를 내려받아 그 텍스트를 읽는다.
+    format: "markdown"(기본, 표 보존) 또는 "html"(표를 <table>로). pages: "1-3"·"2,5"꼴로 필요한
+    쪽만 읽는다(판결·결정의 주문/결론은 보통 문서 끝 → 길면 뒤쪽 페이지를 지정해 다시 읽어라).
     내용을 본 뒤 그걸 근거로 다음 행동을 결정하라(예: 읽은 값을 입력·검색)."""
     obs = await ctx.deps.act({"kind": "read_document", "index": index})
-    return render_observation(documents.extract_into(obs))
+    return render_observation(documents.extract_into(obs, fmt=format, pages=pages or None))
 
 
 @agent.tool_plain

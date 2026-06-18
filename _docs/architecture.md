@@ -118,7 +118,7 @@
 - **테이블은 Markdown으로 변환** — 각 행의 버튼이 그 행의 사건번호/법원명 텍스트를 달고 있어, 모델이 *텍스트로 행을 먼저 매칭*하고 상대 버튼을 누름.
 - **스크린샷은 `see_screen()` opt-in 폴백 전용.** 근거: SeeAct 실험에서 조밀 페이지는 텍스트 선택지 48.9% vs Set-of-Marks 15.1%(텍스트 압승). DOM 텍스트는 캐시가 잘 되고, 1920×1080 스크린샷(~2,691토큰/스텝, 캐시 안 됨)보다 ~10배 저렴.
 - **지각 시점(언제 읽나) — 행동 후 화면이 "정착(settle)"되면 읽는다.** 행동(클릭/입력/선택/스크롤)은 화면을 바꾸므로 *언제* 읽느냐가 정확도를 좌우한다(검색 버튼 직후엔 결과가 아직 안 떴을 수 있다). 액션 실행과 관측을 잇는 다리는 §4의 `settleAndObserve`다. **고정 대기가 아니라 정착 감지로 읽는다:** `MutationObserver`로 DOM 변화를 지켜보다 변화가 `SETTLE_QUIET_MS`(=300ms) 동안 멈추면(=잠잠해지면) 그때 관측하고, 끝없이 바뀌는 위젯에도 반드시 반환하도록 `SETTLE_MAX_MS`(=3000ms) 하드캡을 둔다 — 페이지가 스스로 "다 됐다"고 알리는 셈이라 빠른 화면은 빨리, 느린 AJAX 검색결과는 필요한 만큼 기다린다. `perceive`도 같은 정착을 거쳐 *"모든 관측은 정착된 관측"* 으로 통일한다(단 `extract`는 화면을 안 바꾸는 데이터 추출이라 즉시 관측). `navigate`만은 예외 — 페이지가 통째로 새로 로드되며 content script가 파괴되므로 정착을 못 기다리고 즉시 반환, 모델이 다음에 `perceive`로 새(정착된) 화면을 읽는다(시스템 프롬프트로 강제). **부수효과:** 로딩 화면을 모델이 반복 `perceive`할 필요가 없어져 §6 무진전 가드의 오중단도 해소된다. *트레이드오프(무한 애니메이션은 매번 MAX까지 대기, `QUIET/MAX`는 scourt 실측 후 튜닝)와 구현·검증 메모는 [TODO §MVP이후](TODO.md).*
-- **보안 오버레이:** 페이지 콘텐츠는 `<UNTRUSTED_PAGE_DATA>` 마커로 격리, 숨은 지시 벡터(aria-label 악용·visually-hidden CSS·HTML 주석·URL 프래그먼트) 제거, 주민등록번호/당사자명/계좌번호 토큰화, password+인증서 필드 블랭킹(전송 전).
+- **보안 오버레이:** 페이지 콘텐츠는 `<UNTRUSTED_PAGE_DATA>` 마커로 격리, 숨은 지시 벡터(aria-label 악용·visually-hidden CSS·HTML 주석·URL 프래그먼트) 제거, 주민등록번호/당사자명/계좌번호 토큰화, password+인증서 필드 블랭킹(전송 전). **펜스 토큰 책임은 펜스를 만드는 쪽:** content가 만드는 화면 관측은 content.js `stripMarkers`가, content를 안 거치는 PDF 추출 텍스트는 백엔드 `documents.py`가 닫는 토큰을 제거한다(§11 펜스 탈출 차단). **PDF 추출 엔진은 `opendataloader-pdf`**(Java JAR subprocess, markdown/html) — 표·다단 구조를 보존하고 `content-safety`로 숨은텍스트·off-page·tiny를 기본 필터(숨은 지시 벡터 방어와 정렬). *Phase 11.*
 
 ---
 
@@ -143,7 +143,7 @@
 | `perceive()` | 화면을 바꾸지 않고 인덱스 요소 목록만 다시 읽기(첫 행동·navigate 직후 필수). *Phase 4 구현 시 추가* — 계약상 1 command⇒1 observation이라 첫 관측·재독 채널이 필요 |
 | `click(index)` `type(index, text)` `select(index, opt)` | 인덱스 요소 조작 |
 | `navigate(url)` `scroll(dir)` `extract(query)` | 이동·스크롤·데이터 추출 |
-| `read_document(index)` | 인덱스 문서 링크(PDF)를 받아 **텍스트로 읽기**(그 내용 근거로 다음 행동). *Phase 10 구현* — content가 페이지 출처에서 `fetch`(세션 쿠키 자동)→base64→백엔드가 pymupdf로 텍스트 추출→`<UNTRUSTED_PAGE_DATA>` 펜스로 노출. 읽기 전용이라 화면 상태(`last_observation`)·무진전 해시 미오염(§4 메모) |
+| `read_document(index, format, pages)` | 인덱스 문서 링크(PDF)를 받아 **텍스트로 읽기**(그 내용 근거로 다음 행동). *Phase 10 구현·11 강화* — content가 페이지 출처에서 `fetch`(세션 쿠키 자동)→base64→백엔드가 **opendataloader-pdf**(Java JAR subprocess)로 표·구조 보존 추출(`format`=markdown 기본/html, `pages`="1-3"꼴로 필요한 쪽만 — 결론은 보통 문서 끝)→`<UNTRUSTED_PAGE_DATA>` 펜스로 노출. **펜스 토큰은 펜스를 만드는 백엔드(`documents.py`)가 본문에서 제거**(PDF 텍스트는 content.js stripMarkers를 안 거치는 경로 → §11 펜스 탈출 차단). 읽기 전용이라 화면 상태(`last_observation`)·무진전 해시 미오염(§4 메모) |
 | `see_screen()` | (옵션) DOM만으로 모호할 때만 스크린샷 |
 | `read_sop(path)` | 업무 SOP·재사용 스킬을 *필요할 때* 자가 로드(지연 로딩, 섹션 8) |
 | `search_memory(query)` | 레슨·gotchas·과거 케이스 벡터 검색 |

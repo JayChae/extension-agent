@@ -9,7 +9,7 @@ dependencies = [
     "uvicorn[standard]>=0.49.0",
     "pyyaml>=6.0",
     "cryptography>=43",
-    "pymupdf>=1.24",
+    "opendataloader-pdf>=0.1",
 ]
 
 [dependency-groups]
@@ -17,6 +17,7 @@ dev = [
     "ruff>=0.15.17",
     "pytest>=8.0",
     "httpx>=0.27",
+    "pymupdf>=1.24",  # 테스트 PDF 생성 전용(프로덕션 추출은 opendataloader)
 ]
 
 [tool.ruff]
