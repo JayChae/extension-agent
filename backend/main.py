@@ -7,16 +7,23 @@
 import asyncio
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from pydantic_ai import DeferredToolRequests, DeferredToolResults
+from dotenv import load_dotenv
 
-import audit
-import memory_store
-import safety
-import vault
-from agent import MODEL, agent, render_observation
-from memory_agent import distill, distill_lesson, verify_run
-from session import CaptchaHandoff, RunHalted, Session, Stopped
+# .env를 먼저 로드해야 아래 `from agent import MODEL`이 AGENT_MODEL/ANTHROPIC_API_KEY를
+# 읽을 수 있다(agent.py가 import 시점에 os.getenv로 모델을 정한다). uv run/uvicorn 경로엔
+# load_dotenv가 없어 이 줄이 없으면 .env가 무시된다(live_check.py와 동일 패턴).
+load_dotenv()
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # noqa: E402
+from pydantic_ai import DeferredToolRequests, DeferredToolResults  # noqa: E402
+
+import audit  # noqa: E402
+import memory_store  # noqa: E402
+import safety  # noqa: E402
+import vault  # noqa: E402
+from agent import MODEL, agent, render_observation  # noqa: E402
+from memory_agent import distill, distill_lesson, verify_run  # noqa: E402
+from session import CaptchaHandoff, RunHalted, Session, Stopped  # noqa: E402
 
 app = FastAPI()
 
